@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- C and C++ API (`capi/`, `libsnmpify`): `include/snmpify.h` (clients
+  v1/v2c/v3, get / get-next / get-bulk / set / walks, traps and informs,
+  notification receiver, agent with values and callbacks, MIBs) and the
+  header-only C++17 `include/snmpify.hpp` (RAII, exceptions). CMake
+  package and pkg-config file (Linux, macOS, Windows), shared and static
+  libraries, examples (`get.c`, `walk.cpp`, `trapd.c`). Tested with C and
+  C++ programs (CTest on Linux, macOS and Windows; against net-snmp on
+  Linux; clean under ASan/UBSan/LSan); prebuilt archives on `c-v*` tags.
 - Python bindings (`python/`, PyPI `snmpify`, PyO3, abi3 wheels for
   Python 3.9+ on Linux, macOS and Windows): `Client` (blocking, GIL
   released) and `AsyncClient` (asyncio) with get / get_many / get_next /

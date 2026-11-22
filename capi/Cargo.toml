@@ -1,0 +1,21 @@
+[package]
+name = "snmpify-c"
+version = "0.1.0"
+edition = "2021"
+description = "C and C++ API of snmpify (include/snmpify.h, include/snmpify.hpp): SNMP v1/v2c/v3 client, traps, agent and MIBs."
+license = "MIT"
+repository = "https://github.com/snmp-rs/snmpify"
+publish = false
+
+[lib]
+# libsnmpify.so / .dylib / snmpify.dll, and the static library.
+name = "snmpify"
+crate-type = ["cdylib", "staticlib"]
+# The tests in capi/tests compile src/lib.rs into their own binaries.
+test = false
+doctest = false
+doc = false
+
+[dependencies]
+snmpify = { path = ".." }
+tokio = { version = "1.43.0", features = ["rt-multi-thread", "time", "sync"] }

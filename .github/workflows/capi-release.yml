@@ -1,0 +1,77 @@
+# Prebuilt C/C++ libraries (capi/): pushed tags `c-v*` build the shared and
+# static library for Linux (x86_64, aarch64), macOS (arm64, x86_64) and
+# Windows (x64), run the C/C++ tests, and attach archives (include/, lib/
+# with the CMake package and pkg-config file, bin/ on Windows, README,
+# LICENSE) to the GitHub release of the tag.
+name: C/C++ libraries
+
+on:
+  push:
+    tags: ["c-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, name: linux-x86_64 }
+          - { os: ubuntu-22.04-arm, name: linux-aarch64 }
+          - { os: macos-latest, name: macos-arm64 }
+          - { os: macos-13, name: macos-x86_64 }
+          - { os: windows-latest, name: windows-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+      - name: Build, test and install with CMake
+        shell: bash
+        run: |
+          d="$PWD/snmpify-c-${{ matrix.name }}"
+          cmake -S capi -B build -DCMAKE_BUILD_TYPE=Release -DSNMPIFY_TESTS=ON -DCMAKE_INSTALL_PREFIX="$d"
+          cmake --build build --config Release -j 4
+          ctest --test-dir build -C Release --output-on-failure
+          cmake --install build --config Release
+          if [ "$RUNNER_OS" = "Linux" ]; then strip --strip-unneeded "$d/lib/libsnmpify.so"; fi
+          if [ "$RUNNER_OS" = "macOS" ]; then strip -x "$d/lib/libsnmpify.dylib"; fi
+          cp capi/README.md LICENSE "$d/"
+      - name: Archive
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "snmpify-c-${{ matrix.name }}.zip" "snmpify-c-${{ matrix.name }}"
+          else
+            tar czf "snmpify-c-${{ matrix.name }}.tar.gz" "snmpify-c-${{ matrix.name }}"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: snmpify-c-${{ matrix.name }}
+          path: snmpify-c-${{ matrix.name }}.*
+
+  release:
+    permissions:
+      contents: write
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "C/C++ libraries $GITHUB_REF_NAME" --notes "Prebuilt snmpify C/C++ libraries for Linux, macOS and Windows (see capi/README.md)."
+          gh release upload "$GITHUB_REF_NAME" dist/* -R "$GITHUB_REPOSITORY" --clobber
