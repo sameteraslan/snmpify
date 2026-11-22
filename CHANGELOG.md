@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Benchmarks (`benchmarks/`): snmpify (Rust and Python) against snmp2,
+  async-snmp, csnmp, net-snmp's C library, pysnmp and ezsnmp: walks
+  (v2c and v3), GetRequest latency, mass polling, CPU and memory, with
+  the programs and `run.py` to reproduce them.
+- Python: `snmpify.Manager` (many agents over one socket; `client()` /
+  `blocking_client()`).
+- `Manager::with_max_in_flight` and `client::DEFAULT_MAX_IN_FLIGHT` (64).
 - C and C++ API (`capi/`, `libsnmpify`): `include/snmpify.h` (clients
   v1/v2c/v3, get / get-next / get-bulk / set / walks, traps and informs,
   notification receiver, agent with values and callbacks, MIBs) and the
@@ -65,6 +72,12 @@
 - Tests against net-snmp both ways: snmpify → snmptrapd and snmptrap /
   snmpinform → snmpify, v1, v2c and v3; the robustness test also feeds
   the engine.
+
+### Fixed
+- Mass polling: requests in flight per socket are capped (64 by default).
+  1000 agents answering at once overflowed the socket's receive buffer;
+  the dropped answers were retried a timeout later (1000 agents: 2 s,
+  now 9 ms).
 
 ## 0.1.0 — 2026-11-22
 

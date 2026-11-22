@@ -356,19 +356,14 @@ fn level_name(l: SecurityLevel) -> &'static str {
 // Clients
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
-fn connect(
+fn credentials(
     py: Python<'_>,
-    target: &str,
     community: &str,
     version: &str,
     user: Option<&UsmUser>,
     context: Option<&str>,
-    timeout: f64,
-    retries: u32,
-    max_repetitions: u32,
-) -> PyResult<client::Client> {
-    let creds: Credentials = match user {
+) -> PyResult<Credentials> {
+    Ok(match user {
         Some(u) => {
             let mut usm = Usm::new(u.inner.clone());
             if let Some(c) = context {
@@ -386,19 +381,132 @@ fn connect(
                 ))
             }
         },
-    };
+    })
+}
+
+fn options(py: Python<'_>, timeout: f64, retries: u32, max_repetitions: u32) -> PyResult<Options> {
     if !(timeout > 0.0 && timeout.is_finite()) {
         return Err(invalid(py, "timeout must be a positive number of seconds"));
     }
-    let target = with_port(target);
-    let options = Options {
+    Ok(Options {
         timeout: Duration::from_secs_f64(timeout),
         retries,
         max_repetitions,
-    };
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn connect(
+    py: Python<'_>,
+    target: &str,
+    community: &str,
+    version: &str,
+    user: Option<&UsmUser>,
+    context: Option<&str>,
+    timeout: f64,
+    retries: u32,
+    max_repetitions: u32,
+) -> PyResult<client::Client> {
+    let creds = credentials(py, community, version, user, context)?;
+    let options = options(py, timeout, retries, max_repetitions)?;
+    let target = with_port(target);
     py.detach(|| rt().block_on(client::Client::connect(&target, creds)))
         .map(|c| c.with_options(options))
         .map_err(|e| err_with(py, e))
+}
+
+/// Many agents over one UDP socket: clients made by a manager share its
+/// socket (polling thousands of agents costs one socket). At most
+/// ``max_in_flight`` requests are outstanding at once; more wait.
+#[pyclass(frozen, module = "snmpify")]
+struct Manager {
+    inner: client::Manager,
+}
+
+#[pymethods]
+impl Manager {
+    #[new]
+    #[pyo3(signature = (local="0.0.0.0:0", *, timeout=1.0, retries=2, max_repetitions=25, max_in_flight=64))]
+    fn new(
+        py: Python<'_>,
+        local: &str,
+        timeout: f64,
+        retries: u32,
+        max_repetitions: u32,
+        max_in_flight: usize,
+    ) -> PyResult<Self> {
+        let opts = options(py, timeout, retries, max_repetitions)?;
+        let local = local.to_string();
+        let m = py
+            .detach(|| rt().block_on(client::Manager::bind(&local)))
+            .map_err(|e| err_with(py, e))?;
+        Ok(Manager {
+            inner: m.with_options(opts).with_max_in_flight(max_in_flight),
+        })
+    }
+
+    /// An :class:`AsyncClient` for one agent on the manager's socket.
+    #[pyo3(signature = (target, community="public", version="2c", *, user=None, context=None))]
+    fn client(
+        &self,
+        py: Python<'_>,
+        target: &str,
+        community: &str,
+        version: &str,
+        user: Option<PyRef<'_, UsmUser>>,
+        context: Option<&str>,
+    ) -> PyResult<AsyncClient> {
+        Ok(AsyncClient {
+            inner: self.make(py, target, community, version, user.as_deref(), context)?,
+        })
+    }
+
+    /// A blocking :class:`Client` for one agent on the manager's socket.
+    #[pyo3(signature = (target, community="public", version="2c", *, user=None, context=None))]
+    fn blocking_client(
+        &self,
+        py: Python<'_>,
+        target: &str,
+        community: &str,
+        version: &str,
+        user: Option<PyRef<'_, UsmUser>>,
+        context: Option<&str>,
+    ) -> PyResult<Client> {
+        Ok(Client {
+            inner: self.make(py, target, community, version, user.as_deref(), context)?,
+        })
+    }
+
+    /// The local address of the socket.
+    #[getter]
+    fn address(&self, py: Python<'_>) -> PyResult<String> {
+        self.inner
+            .local_addr()
+            .map(|a| a.to_string())
+            .map_err(|e| err_with(py, e))
+    }
+}
+
+impl Manager {
+    fn make(
+        &self,
+        py: Python<'_>,
+        target: &str,
+        community: &str,
+        version: &str,
+        user: Option<&UsmUser>,
+        context: Option<&str>,
+    ) -> PyResult<client::Client> {
+        use std::net::ToSocketAddrs;
+        let creds = credentials(py, community, version, user, context)?;
+        let t = with_port(target);
+        let addr = t
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut a| a.next())
+            .ok_or_else(|| invalid(py, format!("target {target:?} does not resolve")))?;
+        Ok(self.inner.client(addr, creds))
+    }
 }
 
 /// `host` → `host:161`, a bare IPv6 address → `[addr]:161`.
@@ -1296,6 +1404,7 @@ impl Mib {
 fn _snmpify(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Client>()?;
     m.add_class::<AsyncClient>()?;
+    m.add_class::<Manager>()?;
     m.add_class::<Walk>()?;
     m.add_class::<AsyncWalk>()?;
     m.add_class::<UsmUser>()?;

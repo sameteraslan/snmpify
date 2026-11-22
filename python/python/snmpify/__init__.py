@@ -24,6 +24,7 @@ from ._snmpify import (
     Agent,
     AsyncClient,
     Client,
+    Manager,
     Mib,
     Notification,
     NotificationReceiver,
@@ -32,7 +33,7 @@ from ._snmpify import (
 )
 
 __all__ = [
-    "Agent", "AsyncClient", "Client", "Mib", "Notification", "NotificationReceiver", "UsmUser",
+    "Agent", "AsyncClient", "Client", "Manager", "Mib", "Notification", "NotificationReceiver", "UsmUser",
     "Counter32", "Counter64", "Gauge32", "IpAddress", "ObjectId", "Opaque", "TimeTicks",
     "Unsigned32", "NO_SUCH_OBJECT", "NO_SUCH_INSTANCE", "END_OF_MIB_VIEW",
     "SnmpError", "SnmpTimeout", "AgentError", "ReportError", "InvalidArgument",

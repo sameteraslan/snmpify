@@ -96,14 +96,36 @@ feature, used here as the test agent; [pysnmp] is pure Python; [ezsnmp]
 wraps net-snmp for Python; [gosnmp] is the common Go library. snmpify's
 Python and C/C++ bindings ([roadmap](ROADMAP.md) steps 5 and 6) aim at
 the first three: one fast, tested core for every language. Speed
-comparisons against all of these (walk throughput, latency, mass
-polling, CPU and memory) are step 7 and will be published with
-reproducible scripts.
+comparisons against all of these are in
+[benchmarks/](benchmarks/README.md) (below).
 
 [net-snmp]: http://www.net-snmp.org/
 [pysnmp]: https://pypi.org/project/pysnmp/
 [ezsnmp]: https://pypi.org/project/ezsnmp/
 [gosnmp]: https://github.com/gosnmp/gosnmp
+
+## Benchmarks
+
+Against snmp2, async-snmp, csnmp, net-snmp's C library, pysnmp and ezsnmp,
+on one machine over loopback, medians of 5 runs
+([method, all numbers, how to run them](benchmarks/README.md)):
+
+| | snmpify | snmp2 | async-snmp | csnmp | net-snmp (C) |
+|---|---:|---:|---:|---:|---:|
+| Walk, 200 000 objects (v2c): time | 165 ms | **139 ms** | 178 ms | 520 ms | 164 ms |
+| … CPU | 67 ms | **43 ms** | 79 ms | 396 ms | 60 ms |
+| Walk over SNMPv3 (SHA + AES): CPU | 88 ms | **68 ms** | 116 ms | n/a | 100 ms |
+| 1000 agents polled at once: time | **9 ms** | 86 ms | 4020 ms | 24 ms | 12 ms |
+| … peak memory | **4.8 MB** | 134 MB | 10 MB | 19 MB | 11 MB |
+
+| Python | snmpify | ezsnmp | pysnmp |
+|---|---:|---:|---:|
+| Walk, 200 000 objects | **304 ms** | 2402 ms | 20 011 ms |
+| GetRequest latency (p50) | **11 µs** | 15 µs | 424 µs |
+| 1000 agents polled at once | **29 ms** | 171 ms | 4236 ms (663 answered) |
+
+snmp2 walks with the least CPU (it decodes in place); snmpify is at
+net-snmp's level there, and leads mass polling and Python.
 
 ## Example
 

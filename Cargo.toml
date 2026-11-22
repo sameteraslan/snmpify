@@ -14,6 +14,7 @@ categories = ["network-programming", "encoding", "parser-implementations"]
 
 [workspace]
 members = [".", "python", "capi"]
+exclude = ["benchmarks"]
 # MSRV-aware dependency resolution (picks versions that build on 1.85).
 resolver = "3"
 
