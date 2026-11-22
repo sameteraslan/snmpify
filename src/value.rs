@@ -359,4 +359,80 @@ mod tests {
         );
         assert_eq!(kind(&[0x99, 0x00]), DecodeErrorKind::UnknownValueTag(0x99));
     }
+
+    #[test]
+    fn accessors_and_conversions() {
+        assert_eq!(Value::Integer(-5).as_i64(), Some(-5));
+        assert_eq!(Value::Integer(-5).as_u64(), None);
+        assert_eq!(Value::Integer(5).as_u64(), Some(5));
+        for v in [Value::Counter32(7), Value::Gauge32(7), Value::TimeTicks(7)] {
+            assert_eq!(v.as_i64(), Some(7));
+            assert_eq!(v.as_u64(), Some(7));
+        }
+        assert_eq!(Value::Counter64(u64::MAX).as_i64(), None);
+        assert_eq!(Value::Counter64(u64::MAX).as_u64(), Some(u64::MAX));
+        assert_eq!(Value::Null.as_i64(), None);
+        assert_eq!(Value::Null.as_u64(), None);
+        assert_eq!(Value::from(vec![1u8, 2]).as_bytes(), Some(&[1u8, 2][..]));
+        assert_eq!(Value::Opaque(vec![9]).as_bytes(), Some(&[9u8][..]));
+        assert_eq!(Value::Integer(1).as_bytes(), None);
+        assert_eq!(Value::from(&b"ab"[..]).as_str(), Some("ab"));
+        assert_eq!(Value::Integer(1).as_str(), None);
+        let oid = Oid::from([1, 3, 6]);
+        assert_eq!(Value::from(oid.clone()), Value::ObjectId(oid));
+        let ip = Ipv4Addr::new(10, 1, 2, 3);
+        assert_eq!(Value::from(ip), Value::IpAddress(ip));
+        for (v, exc) in [
+            (Value::NoSuchObject, true),
+            (Value::NoSuchInstance, true),
+            (Value::EndOfMibView, true),
+            (Value::Null, false),
+            (Value::Integer(0), false),
+        ] {
+            assert_eq!(v.is_exception(), exc);
+        }
+    }
+
+    #[test]
+    fn tags_and_display_of_every_type() {
+        let cases = [
+            (Value::Integer(-3), tag::INTEGER, "-3"),
+            (Value::from("hi"), tag::OCTET_STRING, "hi"),
+            (Value::Null, tag::NULL, "NULL"),
+            (
+                Value::ObjectId(Oid::from([1, 3, 6, 1])),
+                tag::OBJECT_IDENTIFIER,
+                "1.3.6.1",
+            ),
+            (
+                Value::IpAddress(Ipv4Addr::new(192, 0, 2, 1)),
+                tag::IP_ADDRESS,
+                "192.0.2.1",
+            ),
+            (Value::Counter32(4), tag::COUNTER32, "4"),
+            (Value::Gauge32(5), tag::GAUGE32, "5"),
+            (
+                Value::TimeTicks(8_640_000 + 366_100),
+                tag::TIMETICKS,
+                "1:01:01:01.00",
+            ),
+            (Value::Opaque(vec![1, 2, 3]), tag::OPAQUE, "Opaque(3 bytes)"),
+            (Value::Counter64(1 << 40), tag::COUNTER64, "1099511627776"),
+            (Value::NoSuchObject, tag::NO_SUCH_OBJECT, "No Such Object"),
+            (
+                Value::NoSuchInstance,
+                tag::NO_SUCH_INSTANCE,
+                "No Such Instance",
+            ),
+            (
+                Value::EndOfMibView,
+                tag::END_OF_MIB_VIEW,
+                "No more variables",
+            ),
+        ];
+        for (v, t, text) in cases {
+            assert_eq!(v.tag(), t, "{v:?}");
+            assert!(v.to_string().starts_with(text), "{v}");
+        }
+    }
 }

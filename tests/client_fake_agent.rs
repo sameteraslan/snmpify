@@ -145,6 +145,8 @@ async fn ignores_spoofed_stray_and_garbage_answers() {
         let good = answer(req);
         vec![
             Reply::Raw(vec![0x30, 0x03, 0x02, 0x01]), // garbage
+            Reply::Raw(vec![0x30, 0x05, 0x02, 0x01, 0x01, 0x04, 0x00]), // v2c, cut short
+            Reply::Raw(vec![0x30, 0x05, 0x02, 0x01, 0x03, 0x30, 0x00]), // v3, no header
             Reply::Pdu {
                 // wrong community
                 pdu: response(vec![VarBind::new([1, 3, 6], "evil")]),
@@ -348,4 +350,57 @@ async fn cancelled_requests_leave_nothing_behind() {
     let b = agent(Arc::new(|_, _, req| vec![answer(req)])).await;
     let c2 = client(&b, Community::v2c("public")).await;
     assert!(c2.get_one("1.3.6.1.2.1.1.5.0").await.is_ok());
+}
+
+#[tokio::test]
+async fn accessors_ipv6_and_short_answers() {
+    let m = Manager::bind("127.0.0.1:0").await.unwrap();
+    assert!(m.local_addr().unwrap().port() > 0);
+    // An answer with fewer bindings than asked for.
+    let a = agent(Arc::new(|_, _, req| {
+        let mut r = answer(req);
+        if let Reply::Pdu { pdu, .. } = &mut r {
+            pdu.varbinds.pop();
+        }
+        vec![r]
+    }))
+    .await;
+    let c = client(&a, Community::v2c("public")).await;
+    assert_eq!(c.target(), a.addr);
+    assert_eq!(c.options().max_repetitions, 3);
+    assert_eq!(c.engine_id(), None);
+    let d = format!("{c:?}");
+    assert!(d.contains("V2c") && d.contains(&a.addr.to_string()), "{d}");
+    assert!(matches!(
+        c.get(["1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.1.6.0"]).await,
+        Err(Error::UnexpectedResponse(_))
+    ));
+    // IPv6 (where the host has it).
+    if let Ok(s) = UdpSocket::bind("[::1]:0").await {
+        let addr = s.local_addr().unwrap();
+        drop(s);
+        let c = Client::connect(&addr.to_string(), Community::v2c("public"))
+            .await
+            .unwrap();
+        assert!(c.target().is_ipv6());
+    }
+    assert!(matches!(
+        Client::connect("no-such-host.invalid:161", Community::v2c("p")).await,
+        Err(Error::Io(_)) | Err(Error::InvalidArgument(_))
+    ));
+}
+
+#[tokio::test]
+async fn walk_ends_on_an_empty_answer() {
+    let a = agent(Arc::new(|_, _, _| {
+        vec![Reply::Pdu {
+            pdu: response(vec![]),
+            community: None,
+            keep_id: false,
+        }]
+    }))
+    .await;
+    let c = client(&a, Community::v2c("public")).await;
+    assert!(c.walk_all("1.3.6.1").await.unwrap().is_empty());
+    assert_eq!(a.requests.load(Ordering::SeqCst), 1);
 }

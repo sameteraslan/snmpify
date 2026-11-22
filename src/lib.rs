@@ -2,10 +2,14 @@
 //!
 //! Fast SNMP for Rust: the wire format (a zero-copy BER decoder, a
 //! back-to-front encoder that never copies nested values, OIDs stored
-//! inline, all SMIv2 value types, every PDU, SNMPv1/v2c messages) and an
-//! async client ([`client`]) with walks and mass polling over one socket.
-//! SNMPv3, notifications and the Python and C/C++ bindings are on the
-//! [roadmap](https://github.com/snmp-rs/snmpify/blob/main/ROADMAP.md).
+//! inline, all SMIv2 value types, every PDU, SNMPv1/v2c and v3 messages),
+//! SNMPv3 security ([`usm`]: every standard authentication and privacy
+//! protocol) and an async client ([`client`]) with walks and mass polling
+//! over one socket. Notifications and the Python and C/C++ bindings are
+//! on the [roadmap](https://github.com/snmp-rs/snmpify/blob/main/ROADMAP.md).
+//!
+//! Features: `client` (default: tokio, implies `v3`), `v3` (USM crypto).
+//! Without both, only the wire format, with no dependencies.
 //!
 //! ```
 //! use snmpify::{CommunityMessage, Pdu, Value, VarBind, Version, AnyPdu};
@@ -32,6 +36,9 @@ pub mod client;
 mod error;
 mod oid;
 mod pdu;
+#[cfg(feature = "v3")]
+pub mod usm;
+pub mod v3;
 mod value;
 
 pub use error::{DecodeError, DecodeErrorKind, ParseOidError};
@@ -42,6 +49,6 @@ pub use pdu::{
 pub use value::{Value, VarBind};
 
 // Compile the README examples as doctests.
-#[cfg(doctest)]
+#[cfg(all(doctest, feature = "client"))]
 #[doc = include_str!("../README.md")]
 pub struct ReadmeDoctests;

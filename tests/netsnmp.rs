@@ -319,4 +319,207 @@ mod client {
         assert!(all.len() > 1000, "{}", all.len());
         assert!(all.windows(2).all(|w| w[0].oid < w[1].oid));
     }
+
+    // -----------------------------------------------------------------------
+    // SNMPv3 (users from tools/snmpd/snmpd.conf: <auth>_<priv>)
+    // -----------------------------------------------------------------------
+
+    use snmpify::client::Manager;
+    use snmpify::usm::{AuthProtocol, PrivProtocol, UsmUser};
+    use snmpify::v3::ReportKind;
+
+    fn short(a: AuthProtocol) -> &'static str {
+        match a {
+            AuthProtocol::Md5 => "md5",
+            AuthProtocol::Sha1 => "sha",
+            AuthProtocol::Sha224 => "sha224",
+            AuthProtocol::Sha256 => "sha256",
+            AuthProtocol::Sha384 => "sha384",
+            AuthProtocol::Sha512 => "sha512",
+        }
+    }
+
+    fn short_priv(p: Option<PrivProtocol>) -> &'static str {
+        match p {
+            None => "none",
+            Some(PrivProtocol::Des) => "des",
+            Some(PrivProtocol::Aes128) => "aes",
+            Some(PrivProtocol::Aes192) => "aes192",
+            Some(PrivProtocol::Aes256) => "aes256",
+        }
+    }
+
+    /// The test agent's user for a combination.
+    fn user(a: AuthProtocol, p: Option<PrivProtocol>) -> UsmUser {
+        let name = format!("{}_{}", short(a), short_priv(p));
+        let u = UsmUser::new(&name)
+            .with_auth(a, format!("auth-{name}"))
+            .unwrap();
+        match p {
+            Some(p) => u.with_privacy(p, format!("priv-{name}")).unwrap(),
+            None => u,
+        }
+    }
+
+    fn agent_addr() -> Option<std::net::SocketAddr> {
+        let a = std::env::var("SNMPIFY_AGENT").ok()?;
+        Some(a.parse().unwrap())
+    }
+
+    macro_rules! addr {
+        () => {
+            match agent_addr() {
+                Some(a) => a,
+                None => {
+                    eprintln!("SNMPIFY_AGENT not set; skipped");
+                    return;
+                }
+            }
+        };
+    }
+
+    #[tokio::test]
+    async fn v3_every_auth_and_privacy_combination() {
+        let addr = addr!();
+        let m = Manager::bind("127.0.0.1:0").await.unwrap();
+        let mut tasks = Vec::new();
+        let mut users = vec![("noauth".to_string(), UsmUser::new("noauth"))];
+        for a in AuthProtocol::ALL {
+            for p in std::iter::once(None).chain(PrivProtocol::ALL.map(Some)) {
+                users.push((format!("{a} / {p:?}"), user(a, p)));
+            }
+        }
+        assert_eq!(users.len(), 31);
+        for (label, u) in users {
+            let c = m.client(addr, u);
+            tasks.push(tokio::spawn(async move {
+                let r = c.get([SYS_NAME, SYS_SERVICES]).await;
+                (label, r, c.engine_id())
+            }));
+        }
+        let mut engine = None;
+        for t in tasks {
+            let (label, r, e) = t.await.unwrap();
+            let vbs = r.unwrap_or_else(|e| panic!("{label}: {e}"));
+            assert_eq!(vbs[0].value, Value::from("snmpify-agent"), "{label}");
+            assert_eq!(vbs[1].value, Value::Integer(72), "{label}");
+            // net-snmp engine ids: 0x80 | enterprise 8072, format 3+.
+            let e = e.unwrap();
+            assert_eq!(&e[..4], &[0x80, 0x00, 0x1f, 0x88], "{label}");
+            assert_eq!(*engine.get_or_insert(e.clone()), e);
+        }
+    }
+
+    #[tokio::test]
+    async fn v3_set_walk_and_bulk() {
+        let addr = addr!();
+        let c = Client::connect(
+            &addr.to_string(),
+            user(AuthProtocol::Sha256, Some(PrivProtocol::Aes128)),
+        )
+        .await
+        .unwrap();
+        let contact = format!("v3-{}", std::process::id());
+        c.set(vec![VarBind::new(oid(SYS_CONTACT), contact.as_str())])
+            .await
+            .unwrap();
+        assert_eq!(
+            c.get_one(SYS_CONTACT).await.unwrap(),
+            Value::from(contact.as_str())
+        );
+        // A v3 bulk walk sees what a v2c walk sees.
+        let v2 = client!(Community::v2c("public"));
+        let names = |v: &[VarBind]| v.iter().map(|vb| vb.oid.clone()).collect::<Vec<_>>();
+        let a = c.walk_all(IF_TABLE).await.unwrap();
+        assert!(!a.is_empty());
+        assert_eq!(names(&a), names(&v2.walk_all(IF_TABLE).await.unwrap()));
+        let bulk = c
+            .get_bulk(1, 5, ["1.3.6.1.2.1.1.3", IF_TABLE])
+            .await
+            .unwrap();
+        assert!(matches!(bulk[0].value, Value::TimeTicks(_)));
+        assert_eq!(bulk.len(), 6);
+        // The whole agent with DES and SHA-512 (large encrypted answers).
+        let d = Client::connect(
+            &addr.to_string(),
+            user(AuthProtocol::Sha512, Some(PrivProtocol::Des)),
+        )
+        .await
+        .unwrap()
+        .with_options(Options {
+            max_repetitions: 50,
+            ..Options::default()
+        });
+        let all = d.walk_all("1.3.6.1").await.unwrap();
+        assert!(all.len() > 1000, "{}", all.len());
+    }
+
+    #[tokio::test]
+    async fn v3_errors_are_reports() {
+        let addr = addr!();
+        let target = addr.to_string();
+        let report = |r: Result<Value, Error>| match r {
+            Err(Error::Report(k)) => k,
+            r => panic!("{r:?}"),
+        };
+        // Wrong authentication password.
+        let u = UsmUser::new("sha_none")
+            .with_auth(AuthProtocol::Sha1, "not-the-password")
+            .unwrap();
+        let c = Client::connect(&target, u).await.unwrap();
+        assert_eq!(report(c.get_one(SYS_NAME).await), ReportKind::WrongDigest);
+        // Wrong protocol (MD5 for a SHA user) is a wrong digest too.
+        let u = UsmUser::new("sha_none")
+            .with_auth(AuthProtocol::Md5, "auth-sha_none")
+            .unwrap();
+        let c = Client::connect(&target, u).await.unwrap();
+        assert_eq!(report(c.get_one(SYS_NAME).await), ReportKind::WrongDigest);
+        // Unknown user.
+        let c = Client::connect(&target, UsmUser::new("nobody"))
+            .await
+            .unwrap();
+        assert_eq!(
+            report(c.get_one(SYS_NAME).await),
+            ReportKind::UnknownUserName
+        );
+        // Privacy for a user that has none.
+        let u = UsmUser::new("md5_none")
+            .with_auth(AuthProtocol::Md5, "auth-md5_none")
+            .unwrap()
+            .with_privacy(PrivProtocol::Aes128, "priv-md5_none")
+            .unwrap();
+        let c = Client::connect(&target, u).await.unwrap();
+        assert_eq!(
+            report(c.get_one(SYS_NAME).await),
+            ReportKind::UnsupportedSecurityLevel
+        );
+        // Wrong privacy password: snmpd drops what it cannot decrypt
+        // (net-snmp's own snmpget times out the same way).
+        let u = UsmUser::new("sha_aes")
+            .with_auth(AuthProtocol::Sha1, "auth-sha_aes")
+            .unwrap()
+            .with_privacy(PrivProtocol::Aes128, "wrong-priv-password")
+            .unwrap();
+        let c = Client::connect(&target, u)
+            .await
+            .unwrap()
+            .with_options(Options {
+                timeout: std::time::Duration::from_millis(300),
+                retries: 0,
+                ..Options::default()
+            });
+        assert!(matches!(c.get_one(SYS_NAME).await, Err(Error::Timeout)));
+        // A level below the user's access (noAuthNoPriv for an auth user):
+        // VACM refuses.
+        let c = Client::connect(&target, UsmUser::new("md5_none"))
+            .await
+            .unwrap();
+        assert!(matches!(
+            c.get_one(SYS_NAME).await,
+            Err(Error::Snmp {
+                status: ErrorStatus::AuthorizationError,
+                ..
+            })
+        ));
+    }
 }

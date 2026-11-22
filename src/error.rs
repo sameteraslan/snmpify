@@ -39,6 +39,11 @@ pub enum DecodeErrorKind {
     UnknownVersion(i32),
     /// Bytes after the end of the message or element.
     TrailingData,
+    /// SNMPv3 `msgFlags` that are not one octet, or privacy without
+    /// authentication.
+    InvalidMsgFlags,
+    /// An SNMPv3 security model other than USM (3).
+    UnsupportedSecurityModel(i32),
 }
 
 impl fmt::Display for DecodeErrorKind {
@@ -61,6 +66,8 @@ impl fmt::Display for DecodeErrorKind {
             UnknownPdu(t) => write!(f, "unknown PDU tag 0x{t:02X}"),
             UnknownVersion(v) => write!(f, "unknown SNMP version {v}"),
             TrailingData => f.write_str("trailing data"),
+            InvalidMsgFlags => f.write_str("invalid msgFlags"),
+            UnsupportedSecurityModel(m) => write!(f, "unsupported security model {m}"),
         }
     }
 }
@@ -99,3 +106,46 @@ impl fmt::Display for ParseOidError {
 }
 
 impl std::error::Error for ParseOidError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_kind_has_its_own_message() {
+        use DecodeErrorKind::*;
+        let kinds = [
+            UnexpectedEnd,
+            IndefiniteLength,
+            LengthTooLarge,
+            UnsupportedTag(0x1F),
+            UnexpectedTag {
+                expected: 0x30,
+                found: 0x02,
+            },
+            EmptyInteger,
+            IntegerOverflow,
+            InvalidNull,
+            InvalidOid,
+            InvalidIpAddress,
+            UnknownValueTag(0x99),
+            UnknownPdu(0xAF),
+            UnknownVersion(7),
+            TrailingData,
+            InvalidMsgFlags,
+            UnsupportedSecurityModel(4),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for k in kinds {
+            let s = DecodeError::new(k, 12).to_string();
+            assert!(s.ends_with(" at byte 12"), "{s}");
+            assert!(seen.insert(s), "{k:?}");
+        }
+        assert!(seen
+            .iter()
+            .any(|s| s.contains("0x30") && s.contains("0x02")));
+        assert!(seen.iter().any(|s| s.contains("security model 4")));
+        let e = ParseOidError("1.x".into());
+        assert_eq!(e.to_string(), "invalid OID \"1.x\"");
+    }
+}
