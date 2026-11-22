@@ -198,7 +198,7 @@ fn oids<I: IntoOid>(it: impl IntoIterator<Item = I>) -> Result<Vec<Oid>> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Community {
     version: Version,
-    community: Vec<u8>,
+    community: Arc<[u8]>,
 }
 
 impl Community {
@@ -206,7 +206,7 @@ impl Community {
     pub fn v1(community: impl AsRef<[u8]>) -> Self {
         Self {
             version: Version::V1,
-            community: community.as_ref().to_vec(),
+            community: community.as_ref().into(),
         }
     }
 
@@ -214,7 +214,7 @@ impl Community {
     pub fn v2c(community: impl AsRef<[u8]>) -> Self {
         Self {
             version: Version::V2c,
-            community: community.as_ref().to_vec(),
+            community: community.as_ref().into(),
         }
     }
 
@@ -317,11 +317,33 @@ impl Default for Options {
 // Shared transport: one socket, one receive task, many outstanding requests
 // ---------------------------------------------------------------------------
 
+/// Request ids are already spread out: a multiplicative hash is enough
+/// (SipHash would cost more than the rest of the lookup).
+#[derive(Default, Clone, Copy)]
+struct IdHasher(u64);
+
+impl std::hash::Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 << 8) | b as u64;
+        }
+    }
+    fn write_i32(&mut self, v: i32) {
+        self.0 = v as u32 as u64;
+    }
+}
+
+type IdHash = std::hash::BuildHasherDefault<IdHasher>;
+
 /// What an answer must be to be accepted for a request.
+#[derive(Clone)]
 enum Expect {
     Community {
         version: Version,
-        community: Vec<u8>,
+        community: Arc<[u8]>,
     },
     V3 {
         keys: Arc<LocalizedUser>,
@@ -332,7 +354,8 @@ enum Expect {
 }
 
 enum Reply {
-    Community(Pdu),
+    /// The whole message (decoded by the request: owned or in place).
+    Community(Vec<u8>),
     V3 {
         pdu: Pdu,
         usm: UsmParams,
@@ -344,6 +367,32 @@ struct Waiter {
     from: SocketAddr,
     expect: Expect,
     tx: oneshot::Sender<Reply>,
+    /// When the current attempt times out (UDP; the reader expires it).
+    deadline: Instant,
+}
+
+/// What the request reading the UDP socket holds: the buffer, and one
+/// sleep for every request's deadline. The sleep is armed at the earliest
+/// deadline and re-armed only when it fires or an earlier deadline comes
+/// (`Shared::rearm`), so a request costs no timer of its own.
+struct Receiver {
+    buf: Vec<u8>,
+    sleep: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
+    armed: Option<Instant>,
+}
+
+impl Receiver {
+    /// Arms the sleep for `d` if it is earlier than what is armed.
+    fn arm(&mut self, d: Instant) {
+        if self.armed.is_some_and(|a| a <= d) {
+            return;
+        }
+        self.armed = Some(d);
+        match &mut self.sleep {
+            Some(s) => s.as_mut().reset(d.into()),
+            None => self.sleep = Some(Box::pin(tokio::time::sleep_until(d.into()))),
+        }
+    }
 }
 
 /// UDP, or one TCP connection to one agent (RFC 3430).
@@ -357,7 +406,24 @@ enum Socket {
 
 struct Shared {
     socket: Socket,
-    pending: Mutex<HashMap<i32, Waiter>>,
+    /// UDP connected to its one agent (cheaper sends; the kernel filters
+    /// the source).
+    connected: bool,
+    pending: Mutex<HashMap<i32, Waiter, IdHash>>,
+    /// The right to read the UDP socket, with the receive buffer. A waiting
+    /// request takes it, reads until its own answer comes (no hand-off for
+    /// that one) and passes the others' answers on; then the next waiting
+    /// request takes it (the lock is fair: no thundering herd).
+    receiver: Mutex<Option<Receiver>>,
+    /// Signalled when the receiver is put back (a waiting request may take
+    /// it).
+    receiver_free: tokio::sync::Notify,
+    /// The earliest deadline any request registered (as nanoseconds since
+    /// `start`); a request with a deadline before it wakes the reader to
+    /// re-arm.
+    earliest: AtomicU64,
+    rearm: std::sync::atomic::AtomicBool,
+    reader_waker: Mutex<Option<std::task::Waker>>,
     next_id: AtomicU32,
     /// Privacy salts: must not repeat for a key, so a counter.
     next_salt: AtomicU64,
@@ -366,12 +432,15 @@ struct Shared {
     start: Instant,
     /// Requests in flight on the socket; more wait for a permit, so a burst
     /// of answers does not overflow the socket's receive buffer.
-    in_flight: Mutex<Arc<tokio::sync::Semaphore>>,
+    in_flight: std::sync::atomic::AtomicUsize,
+    in_flight_limit: std::sync::atomic::AtomicUsize,
+    in_flight_free: tokio::sync::Notify,
 }
 
 impl Shared {
     async fn send(&self, bytes: &[u8], target: SocketAddr) -> io::Result<()> {
         match &self.socket {
+            Socket::Udp(s) if self.connected => s.send(bytes).await.map(|_| ()),
             Socket::Udp(s) => s.send_to(bytes, target).await.map(|_| ()),
             Socket::Tcp { write, .. } => {
                 use tokio::io::AsyncWriteExt;
@@ -391,6 +460,109 @@ impl Shared {
         matches!(self.socket, Socket::Tcp { .. })
     }
 
+    /// Notes a new deadline; wakes the reader if it must re-arm earlier.
+    fn register_deadline(&self, d: Instant) {
+        let ns = d.saturating_duration_since(self.start).as_nanos() as u64;
+        if self.earliest.fetch_min(ns, Ordering::AcqRel) > ns {
+            self.rearm.store(true, Ordering::Release);
+            if let Some(w) = &*self.reader_waker.lock().unwrap_or_else(|e| e.into_inner()) {
+                w.wake_by_ref();
+            }
+        }
+    }
+
+    /// A slot for a request in flight (waits while the limit is reached).
+    async fn slot(&self) -> Slot<'_> {
+        loop {
+            let limit = self.in_flight_limit.load(Ordering::Acquire);
+            let cur = self.in_flight.load(Ordering::Acquire);
+            if cur < limit {
+                if self
+                    .in_flight
+                    .compare_exchange_weak(cur, cur + 1, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    return Slot(self);
+                }
+                continue;
+            }
+            let freed = self.in_flight_free.notified();
+            tokio::pin!(freed);
+            freed.as_mut().enable();
+            if self.in_flight.load(Ordering::Acquire) < self.in_flight_limit.load(Ordering::Acquire)
+            {
+                continue;
+            }
+            freed.await;
+        }
+    }
+
+    /// The receiver, if nobody holds it.
+    fn try_take_receiver(&self) -> Option<ReceiverGuard<'_>> {
+        let r = self
+            .receiver
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()?;
+        Some(ReceiverGuard {
+            shared: self,
+            r: Some(r),
+        })
+    }
+
+    /// The receiver (the right to read the socket), when it is free.
+    async fn take_receiver(&self) -> ReceiverGuard<'_> {
+        loop {
+            let freed = self.receiver_free.notified();
+            tokio::pin!(freed);
+            freed.as_mut().enable();
+            if let Some(r) = self
+                .receiver
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+            {
+                return ReceiverGuard {
+                    shared: self,
+                    r: Some(r),
+                };
+            }
+            freed.await;
+        }
+    }
+
+    /// Ready when a request registered a deadline earlier than the armed
+    /// one (the reader then re-arms).
+    fn poll_rearm(&self, cx: &mut std::task::Context<'_>) -> std::task::Poll<()> {
+        if self.rearm.swap(false, Ordering::AcqRel) {
+            return std::task::Poll::Ready(());
+        }
+        {
+            let mut w = self.reader_waker.lock().unwrap_or_else(|e| e.into_inner());
+            if !w.as_ref().is_some_and(|w| w.will_wake(cx.waker())) {
+                *w = Some(cx.waker().clone());
+            }
+        }
+        if self.rearm.swap(false, Ordering::AcqRel) {
+            std::task::Poll::Ready(())
+        } else {
+            std::task::Poll::Pending
+        }
+    }
+
+    /// Drops the waiters past their deadline (except `own`, which the
+    /// reader handles itself); returns the earliest deadline left.
+    fn expire(&self, now: Instant, own: i32) -> Option<Instant> {
+        let mut p = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        p.retain(|id, w| *id == own || w.deadline > now);
+        let next = p.values().map(|w| w.deadline).min();
+        let ns = next.map_or(u64::MAX, |d| {
+            d.saturating_duration_since(self.start).as_nanos() as u64
+        });
+        self.earliest.store(ns, Ordering::Release);
+        next
+    }
+
     fn take(&self, id: i32) -> Option<Waiter> {
         self.pending
             .lock()
@@ -401,19 +573,35 @@ impl Shared {
 
 struct Transport {
     shared: Arc<Shared>,
-    task: JoinHandle<()>,
+    /// The TCP reader (UDP needs no task: requests read the socket).
+    task: Option<JoinHandle<()>>,
 }
 
 impl Drop for Transport {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(t) = &self.task {
+            t.abort();
+        }
     }
 }
 
 impl Transport {
-    async fn bind(local: SocketAddr, check_source: bool) -> io::Result<Arc<Transport>> {
+    /// A UDP socket; `connect`ed to its agent when it has only one.
+    async fn bind(
+        local: SocketAddr,
+        check_source: bool,
+        connect: Option<SocketAddr>,
+    ) -> io::Result<Arc<Transport>> {
         let socket = UdpSocket::bind(local).await?;
-        Ok(Self::start(Socket::Udp(socket), check_source, None))
+        if let Some(target) = connect {
+            socket.connect(target).await?;
+        }
+        Ok(Self::start(
+            Socket::Udp(socket),
+            check_source,
+            connect.is_some(),
+            None,
+        ))
     }
 
     /// A TCP connection to `target`.
@@ -426,12 +614,13 @@ impl Transport {
             write: tokio::sync::Mutex::new(write),
             local,
         };
-        Ok(Self::start(socket, false, Some((read, target))))
+        Ok(Self::start(socket, false, false, Some((read, target))))
     }
 
     fn start(
         socket: Socket,
         check_source: bool,
+        connected: bool,
         tcp: Option<(tokio::net::tcp::OwnedReadHalf, SocketAddr)>,
     ) -> Arc<Transport> {
         // Start request ids somewhere unpredictable, like net-snmp, so that a
@@ -443,17 +632,26 @@ impl Transport {
             ^ std::process::id();
         let shared = Arc::new(Shared {
             socket,
-            pending: Mutex::new(HashMap::new()),
+            connected,
+            pending: Mutex::new(HashMap::default()),
+            receiver: Mutex::new(Some(Receiver {
+                buf: Vec::new(),
+                sleep: None,
+                armed: None,
+            })),
+            receiver_free: tokio::sync::Notify::new(),
+            earliest: AtomicU64::new(u64::MAX),
+            rearm: std::sync::atomic::AtomicBool::new(false),
+            reader_waker: Mutex::new(None),
             next_id: AtomicU32::new(seed),
             next_salt: AtomicU64::new(((seed as u64) << 32) ^ seed.rotate_left(7) as u64),
             check_source,
             start: Instant::now(),
-            in_flight: Mutex::new(Arc::new(tokio::sync::Semaphore::new(DEFAULT_MAX_IN_FLIGHT))),
+            in_flight: std::sync::atomic::AtomicUsize::new(0),
+            in_flight_limit: std::sync::atomic::AtomicUsize::new(DEFAULT_MAX_IN_FLIGHT),
+            in_flight_free: tokio::sync::Notify::new(),
         });
-        let task = match tcp {
-            None => tokio::spawn(receive(shared.clone())),
-            Some((read, peer)) => tokio::spawn(receive_tcp(shared.clone(), read, peer)),
-        };
+        let task = tcp.map(|(read, peer)| tokio::spawn(receive_tcp(shared.clone(), read, peer)));
         Arc::new(Transport { shared, task })
     }
 
@@ -466,22 +664,6 @@ impl Transport {
     }
 }
 
-async fn receive(shared: Arc<Shared>) {
-    let Socket::Udp(socket) = &shared.socket else {
-        return;
-    };
-    let mut buf = vec![0u8; 65_535];
-    loop {
-        let (n, from) = match socket.recv_from(&mut buf).await {
-            Ok(x) => x,
-            // ICMP port unreachable etc. are reported on later receives;
-            // the request times out (and is retried) instead.
-            Err(_) => continue,
-        };
-        dispatch(&shared, &buf[..n], from);
-    }
-}
-
 /// Reads messages from a TCP connection until it ends; then fails the
 /// requests still waiting (their channels close).
 async fn receive_tcp(
@@ -490,7 +672,7 @@ async fn receive_tcp(
     peer: SocketAddr,
 ) {
     while let Ok(Some(msg)) = crate::tcp::read_message(&mut read).await {
-        dispatch(&shared, &msg, peer);
+        dispatch(&shared, &msg, peer, None);
     }
     shared
         .pending
@@ -499,44 +681,87 @@ async fn receive_tcp(
         .clear();
 }
 
-/// Hands an answer to the request it belongs to, if it passes the checks.
-fn dispatch(shared: &Shared, bytes: &[u8], from: SocketAddr) {
+/// What a request's answer is handed over as: in place (still in the
+/// receive buffer) or owned.
+enum ReplyRef<'a> {
+    Community(&'a [u8]),
+    Owned(Reply),
+}
+
+/// The reader's own answer, as `dispatch` found it.
+enum Mine {
+    /// A valid community answer: the datagram itself.
+    Raw,
+    /// An answer already decoded (SNMPv3: decrypted).
+    Reply(Reply),
+}
+
+/// The request reading the socket: its id, expectation and agent.
+struct Own<'a> {
+    id: i32,
+    expect: &'a Expect,
+    target: SocketAddr,
+}
+
+/// Hands an answer to the request it belongs to, if it passes the checks;
+/// an answer for `own` (the request doing the reading, not in the table)
+/// is returned instead.
+fn dispatch(
+    shared: &Shared,
+    bytes: &[u8],
+    from: SocketAddr,
+    own: Option<&Own<'_>>,
+) -> Option<Mine> {
     {
         // Not SNMP or malformed: ignore, the request may retry.
         let Ok(version) = peek_version(bytes) else {
-            return;
+            return None;
         };
+        // Community messages: the headers are enough to match (the
+        // request decodes the bindings, owned or in place).
         let (id, community) = if version == Version::V3 {
-            let Some(id) = peek_msg_id(bytes) else {
-                return;
-            };
+            let id = peek_msg_id(bytes)?;
             (id, None)
         } else {
-            let Ok(msg) = CommunityMessage::decode(bytes) else {
-                return;
-            };
-            let AnyPdu::Pdu(pdu) = msg.pdu else { return };
-            (pdu.request_id, Some((msg.version, msg.community, pdu)))
+            let (v, c, pdu) = crate::view::community_pdu(bytes).ok()?;
+            (pdu.request_id, Some((v, c)))
         };
-        let Some(w) = shared.take(id) else { return };
-        let reply = if shared.check_source && w.from != from {
+        let mine = own.filter(|o| o.id == id);
+        let waiter = match mine {
+            Some(_) => None,
+            None => Some(shared.take(id)?),
+        };
+        let (expect, expected_from) = match (mine, &waiter) {
+            (Some(o), _) => (o.expect, o.target),
+            (None, Some(w)) => (&w.expect, w.from),
+            (None, None) => return None,
+        };
+        let reply = if shared.check_source && expected_from != from {
             None
         } else {
-            match (&w.expect, community) {
+            match (expect, community) {
                 (
                     Expect::Community {
                         version,
                         community: c,
                     },
-                    Some((v, mc, pdu)),
-                ) if *version == v && *c == mc => Some(Reply::Community(pdu)),
-                (Expect::V3 { .. }, None) => accept_v3(&w.expect, bytes),
+                    Some((v, mc)),
+                ) if *version == v && **c == *mc => Some(Mine::Raw),
+                (Expect::V3 { .. }, None) => accept_v3(expect, bytes).map(Mine::Reply),
                 _ => None,
             }
         };
+        let Some(w) = waiter else {
+            return reply; // ours (or not a valid answer: ignored)
+        };
         match reply {
-            Some(r) => {
+            Some(m) => {
+                let r = match m {
+                    Mine::Raw => Reply::Community(bytes.to_vec()),
+                    Mine::Reply(r) => r,
+                };
                 let _ = w.tx.send(r);
+                None
             }
             None => {
                 // Not our answer (spoofed, forged, another agent): keep waiting.
@@ -545,6 +770,7 @@ fn dispatch(shared: &Shared, bytes: &[u8], from: SocketAddr) {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(id, w);
+                None
             }
         }
     }
@@ -596,6 +822,49 @@ fn timely((boots, time): (u32, u32), usm: &UsmParams) -> bool {
         || (usm.engine_boots == boots && usm.engine_time.saturating_add(150) < time))
 }
 
+/// A request in flight; frees its place when dropped.
+struct Slot<'a>(&'a Shared);
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        self.0.in_flight.fetch_sub(1, Ordering::AcqRel);
+        // Always: two places freed before a woken waiter runs would
+        // otherwise leave the second waiter asleep. Cheap without waiters.
+        self.0.in_flight_free.notify_one();
+    }
+}
+
+/// The receiver taken by a request; put back (and the next waiting
+/// request told) when dropped, even if the request is cancelled.
+struct ReceiverGuard<'a> {
+    shared: &'a Shared,
+    r: Option<Receiver>,
+}
+
+impl std::ops::Deref for ReceiverGuard<'_> {
+    type Target = Receiver;
+    fn deref(&self) -> &Receiver {
+        self.r.as_ref().expect("held until dropped")
+    }
+}
+
+impl std::ops::DerefMut for ReceiverGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Receiver {
+        self.r.as_mut().expect("held until dropped")
+    }
+}
+
+impl Drop for ReceiverGuard<'_> {
+    fn drop(&mut self) {
+        *self
+            .shared
+            .receiver
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = self.r.take();
+        self.shared.receiver_free.notify_one();
+    }
+}
+
 /// Removes a pending request when its future is dropped (cancellation).
 struct PendingGuard<'a> {
     shared: &'a Shared,
@@ -644,7 +913,7 @@ impl Manager {
             .next()
             .ok_or(Error::InvalidArgument("local address does not resolve"))?;
         Ok(Manager {
-            transport: Transport::bind(local, true).await?,
+            transport: Transport::bind(local, true, None).await?,
             options: Options::default(),
         })
     }
@@ -664,12 +933,9 @@ impl Manager {
     /// [`DEFAULT_MAX_IN_FLIGHT`]); more wait their turn. Raise it with
     /// remote agents and a large receive buffer (`net.core.rmem_default`).
     pub fn with_max_in_flight(self, n: usize) -> Self {
-        *self
-            .transport
-            .shared
-            .in_flight
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Arc::new(tokio::sync::Semaphore::new(n.max(1)));
+        let shared = &self.transport.shared;
+        shared.in_flight_limit.store(n.max(1), Ordering::Release);
+        shared.in_flight_free.notify_waiters();
         self
     }
 
@@ -808,7 +1074,7 @@ impl Client {
             (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
         };
         Ok(Client {
-            transport: Transport::bind(local, true).await?,
+            transport: Transport::bind(local, true, Some(target)).await?,
             target,
             security: Security::new(credentials.into()),
             options: Options::default(),
@@ -873,63 +1139,212 @@ impl Client {
         };
         let id = self.transport.next_id();
         pdu.request_id = id;
-        let bytes = CommunityMessage::new(c.version, &c.community, pdu).encode();
+        let bytes = crate::pdu::encode_community(c.version, &c.community, &pdu);
         let expect = Expect::Community {
             version: c.version,
             community: c.community.clone(),
         };
-        match self.exchange(id, &bytes, expect).await? {
-            Reply::Community(pdu) => Ok(pdu),
-            Reply::V3 { .. } => Err(Error::UnexpectedResponse("SNMPv3 answer")),
-        }
+        self.exchange_map(id, &bytes, expect, |r| {
+            let raw = match &r {
+                ReplyRef::Community(b) => *b,
+                ReplyRef::Owned(Reply::Community(v)) => v.as_slice(),
+                ReplyRef::Owned(Reply::V3 { .. }) => {
+                    return Err(Error::UnexpectedResponse("SNMPv3 answer"))
+                }
+            };
+            match CommunityMessage::decode(raw).map_err(Error::Decode)?.pdu {
+                AnyPdu::Pdu(p) => Ok(p),
+                AnyPdu::TrapV1(_) => Err(Error::UnexpectedResponse("an SNMPv1 trap")),
+            }
+        })
+        .await
+    }
+
+    /// A community request whose answer is handed to `map` as a message,
+    /// where it lies (for decoding in place).
+    async fn request_with<T>(
+        &self,
+        c: &Community,
+        mut pdu: Pdu,
+        map: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<T> {
+        let id = self.transport.next_id();
+        pdu.request_id = id;
+        let bytes = crate::pdu::encode_community(c.version, &c.community, &pdu);
+        let expect = Expect::Community {
+            version: c.version,
+            community: c.community.clone(),
+        };
+        self.exchange_map(id, &bytes, expect, |r| match r {
+            ReplyRef::Community(b) => map(b),
+            ReplyRef::Owned(Reply::Community(v)) => map(&v),
+            ReplyRef::Owned(Reply::V3 { .. }) => Err(Error::UnexpectedResponse("SNMPv3 answer")),
+        })
+        .await
     }
 
     /// Sends `bytes` until an answer for `id` passes `expect`, retrying on
     /// timeout.
     async fn exchange(&self, id: i32, bytes: &[u8], expect: Expect) -> Result<Reply> {
+        self.exchange_map(id, bytes, expect, |r| {
+            Ok(match r {
+                ReplyRef::Community(b) => Reply::Community(b.to_vec()),
+                ReplyRef::Owned(r) => r,
+            })
+        })
+        .await
+    }
+
+    /// Like `exchange`, handing the answer to `map` where it lies (the
+    /// reader's own answer is not copied out of the receive buffer).
+    async fn exchange_map<T>(
+        &self,
+        id: i32,
+        bytes: &[u8],
+        expect: Expect,
+        map: impl FnOnce(ReplyRef<'_>) -> Result<T>,
+    ) -> Result<T> {
         let shared = &self.transport.shared;
-        let limit = shared
-            .in_flight
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        let _permit = limit.acquire_owned().await.map_err(|_| Error::Timeout)?;
-        let (tx, mut rx) = oneshot::channel();
-        shared
-            .pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                id,
-                Waiter {
-                    from: self.target,
-                    expect,
-                    tx,
-                },
-            );
-        let _guard = PendingGuard { shared, id };
-        // TCP delivers or fails: no retransmission (RFC 3430 §2.1); the
-        // request gets the time all attempts would have had.
-        let (attempts, timeout) = if shared.is_tcp() {
-            (1, self.options.timeout * (self.options.retries + 1))
-        } else {
-            (self.options.retries + 1, self.options.timeout)
-        };
-        for _ in 0..attempts {
+        let _slot = shared.slot().await;
+        let timeout = self.options.timeout;
+        if shared.is_tcp() {
+            // TCP delivers or fails: no retransmission (RFC 3430 §2.1); the
+            // request gets the time all attempts would have had.
+            let (tx, rx) = oneshot::channel();
+            shared
+                .pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    id,
+                    Waiter {
+                        from: self.target,
+                        expect,
+                        tx,
+                        deadline: Instant::now(),
+                    },
+                );
+            let _guard = PendingGuard { shared, id };
             shared.send(bytes, self.target).await?;
-            match tokio::time::timeout(timeout, &mut rx).await {
-                Ok(Ok(reply)) => return Ok(reply),
-                Ok(Err(_)) if shared.is_tcp() => {
-                    return Err(Error::Io(io::Error::new(
-                        io::ErrorKind::ConnectionAborted,
-                        "the agent closed the connection",
-                    )))
+            return match tokio::time::timeout(timeout * (self.options.retries + 1), rx).await {
+                Ok(Ok(reply)) => map(ReplyRef::Owned(reply)),
+                Ok(Err(_)) => Err(Error::Io(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "the agent closed the connection",
+                ))),
+                Err(_) => Err(Error::Timeout),
+            };
+        }
+        let mut deadline = Instant::now() + timeout;
+        let mut retries_left = self.options.retries;
+        shared.send(bytes, self.target).await?;
+        // The common case: nobody is reading the socket, so read it
+        // ourselves: no table entry, no channel, no hand-off.
+        let mut reader = match shared.try_take_receiver() {
+            Some(r) => r,
+            None => {
+                // Others read: wait in the table for our answer, or for our
+                // turn to read.
+                let (tx, mut rx) = oneshot::channel();
+                let waiter = |tx, deadline| Waiter {
+                    from: self.target,
+                    expect: expect.clone(),
+                    tx,
+                    deadline,
+                };
+                shared
+                    .pending
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id, waiter(tx, deadline));
+                shared.register_deadline(deadline);
+                let _guard = PendingGuard { shared, id };
+                loop {
+                    tokio::select! {
+                        biased;
+                        got = &mut rx => match got {
+                            Ok(reply) => return map(ReplyRef::Owned(reply)),
+                            // Expired by the reader: try again.
+                            Err(_) => {
+                                if retries_left == 0 {
+                                    return Err(Error::Timeout);
+                                }
+                                retries_left -= 1;
+                                deadline = Instant::now() + timeout;
+                                let (tx, new_rx) = oneshot::channel();
+                                rx = new_rx;
+                                shared
+                                    .pending
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .insert(id, waiter(tx, deadline));
+                                shared.register_deadline(deadline);
+                                shared.send(bytes, self.target).await?;
+                            }
+                        },
+                        r = shared.take_receiver() => {
+                            // Our turn to read: leave the table (nobody else
+                            // reads now), unless the answer already came.
+                            shared.take(id);
+                            if let Ok(reply) = rx.try_recv() {
+                                return map(ReplyRef::Owned(reply));
+                            }
+                            break r;
+                        }
+                    }
                 }
-                Ok(Err(_)) => return Err(Error::Timeout), // receive task gone
-                Err(_) => continue,
+            }
+        };
+        let Socket::Udp(socket) = &shared.socket else {
+            unreachable!("TCP handled above")
+        };
+        let own = Own {
+            id,
+            expect: &expect,
+            target: self.target,
+        };
+        let r = &mut *reader;
+        if r.buf.is_empty() {
+            r.buf.resize(65_535, 0);
+        }
+        r.arm(deadline);
+        loop {
+            let sleep = r.sleep.as_mut().expect("armed above");
+            tokio::select! {
+                biased;
+                res = socket.recv_from(&mut r.buf) => {
+                    // ICMP errors (port unreachable) and the like: the
+                    // request times out (and is retried) instead.
+                    if let Ok((n, from)) = res {
+                        match dispatch(shared, &r.buf[..n], from, Some(&own)) {
+                            Some(Mine::Raw) => return map(ReplyRef::Community(&r.buf[..n])),
+                            Some(Mine::Reply(reply)) => return map(ReplyRef::Owned(reply)),
+                            None => {}
+                        }
+                    }
+                }
+                () = sleep.as_mut() => {
+                    let now = Instant::now();
+                    r.armed = None;
+                    if deadline <= now {
+                        if retries_left == 0 {
+                            return Err(Error::Timeout);
+                        }
+                        retries_left -= 1;
+                        deadline = now + timeout;
+                        shared.send(bytes, self.target).await?;
+                    }
+                    let next = shared.expire(now, id);
+                    r.arm(next.map_or(deadline, |n| n.min(deadline)));
+                }
+                () = std::future::poll_fn(|cx| shared.poll_rearm(cx)) => {
+                    let e = shared.earliest.load(Ordering::Acquire);
+                    if e != u64::MAX {
+                        r.arm(shared.start + Duration::from_nanos(e));
+                    }
+                }
             }
         }
-        Err(Error::Timeout)
     }
 
     /// The engine, discovering it first if needed (once for all clones).
@@ -1089,7 +1504,19 @@ impl Client {
 
     /// GetRequest for one OID, returning its value.
     pub async fn get_one(&self, oid: impl IntoOid) -> Result<Value> {
-        Ok(self.get([oid.into_oid()?]).await?.remove(0).value)
+        let oid = oid.into_oid()?;
+        if !oid.is_valid() {
+            return Err(Error::InvalidArgument(
+                "OIDs need two arcs or more, the first 0-2",
+            ));
+        }
+        let mut vbs = self.checked(Pdu::get(0, [oid])).await?;
+        if vbs.len() != 1 {
+            return Err(Error::UnexpectedResponse(
+                "binding count differs from the request",
+            ));
+        }
+        Ok(vbs.pop().map(|vb| vb.value).unwrap_or(Value::Null))
     }
 
     /// GetNextRequest.
@@ -1155,7 +1582,7 @@ impl Client {
                     "SNMPv1 has its own trap format: use trap_v1",
                 ))
             }
-            Security::Community(c) => CommunityMessage::new(c.version, &c.community, pdu).encode(),
+            Security::Community(c) => crate::pdu::encode_community(c.version, &c.community, &pdu),
             Security::Usm(s) => s
                 .local
                 .originate(s.usm.user.name(), id, &s.usm.context_name, pdu)
@@ -1175,7 +1602,7 @@ impl Client {
                 ))
             }
         };
-        let bytes = CommunityMessage::new(Version::V1, &c.community, trap).encode();
+        let bytes = CommunityMessage::new(Version::V1, &*c.community, trap).encode();
         self.transport.shared.send(&bytes, self.target).await?;
         Ok(())
     }
@@ -1214,13 +1641,126 @@ impl Client {
         })
     }
 
+    /// Walks the subtree under `root` like [`walk`](Self::walk), handing
+    /// each binding to `f` as it is read from the answer, without
+    /// allocating (SNMPv1/v2c; SNMPv3 answers, decrypted, go through the
+    /// owned decoder). Returns the number of bindings.
+    ///
+    /// ```no_run
+    /// # async fn f(client: snmpify::client::Client) -> snmpify::client::Result<()> {
+    /// let mut octets = 0u64;
+    /// client
+    ///     .walk_with("1.3.6.1.2.1.31.1.1.1.6", |vb| octets += vb.value.as_u64().unwrap_or(0))
+    ///     .await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn walk_with(
+        &self,
+        root: impl IntoOid,
+        mut f: impl FnMut(crate::view::VarBindRef<'_>),
+    ) -> Result<usize> {
+        use crate::view::{ber_contents, community_pdu, ValueRef};
+        let root = root.into_oid()?;
+        let c = match &self.security {
+            Security::Community(c) => c,
+            Security::Usm(_) => {
+                // Owned batches, re-read as views.
+                let mut w = self.walk(root)?;
+                let mut n = 0;
+                let mut batch = Vec::new();
+                loop {
+                    batch.clear();
+                    w.fill(&mut batch).await?;
+                    if !batch.is_empty() {
+                        let msg = CommunityMessage::new(
+                            Version::V2c,
+                            "",
+                            Pdu::set(0, std::mem::take(&mut batch)),
+                        )
+                        .encode();
+                        let (_, _, p) = community_pdu(&msg).map_err(Error::Decode)?;
+                        for vb in p.varbinds {
+                            f(vb.map_err(Error::Decode)?);
+                            n += 1;
+                        }
+                    }
+                    if w.done {
+                        return Ok(n);
+                    }
+                }
+            }
+        };
+        let root_ber = ber_contents(&root);
+        let mut cursor = root.clone();
+        let mut cursor_ber = root_ber.clone();
+        let mut n = 0;
+        let v1 = c.version == Version::V1;
+        loop {
+            let pdu = if v1 {
+                Pdu::get_next(0, [cursor.clone()])
+            } else {
+                Pdu::get_bulk(
+                    0,
+                    0,
+                    clamp_i32(self.options.max_repetitions.max(1)),
+                    [cursor.clone()],
+                )
+            };
+            let (next, end) = self
+                .request_with(c, pdu, |raw| {
+                    let (_, _, p) = community_pdu(raw).map_err(Error::Decode)?;
+                    match p.error_status {
+                        0 => {}
+                        // v1's end of the MIB view.
+                        2 if v1 => return Ok((None, true)),
+                        code => {
+                            return Err(Error::Snmp {
+                                status: ErrorStatus::from_code(code),
+                                index: u32::try_from(p.error_index).unwrap_or(0),
+                                oid: None,
+                            })
+                        }
+                    }
+                    let mut last: Option<&[u8]> = None;
+                    let mut end = false;
+                    for vb in p.varbinds {
+                        let vb = vb.map_err(Error::Decode)?;
+                        if vb.value == ValueRef::EndOfMibView || !vb.oid.starts_with_ber(&root_ber)
+                        {
+                            end = true;
+                            break;
+                        }
+                        let prev = last.unwrap_or(&cursor_ber);
+                        if vb.oid.cmp_ber(prev) != std::cmp::Ordering::Greater {
+                            return Err(Error::NotIncreasing {
+                                previous: Box::new(
+                                    Oid::from_ber(prev).unwrap_or_else(|_| cursor.clone()),
+                                ),
+                                next: Box::new(vb.oid.to_oid().unwrap_or_else(|_| cursor.clone())),
+                            });
+                        }
+                        last = Some(vb.oid.as_ber());
+                        f(vb);
+                        n += 1;
+                    }
+                    let end = end || last.is_none();
+                    Ok((last.map(<[u8]>::to_vec), end))
+                })
+                .await?;
+            let Some(last) = next.filter(|_| !end) else {
+                return Ok(n);
+            };
+            cursor_ber = last;
+            cursor =
+                Oid::from_ber(&cursor_ber).map_err(|k| Error::Decode(DecodeError::new(k, 0)))?;
+        }
+    }
+
     /// The whole subtree under `root` as a vector.
     pub async fn walk_all(&self, root: impl IntoOid) -> Result<Vec<VarBind>> {
         let mut w = self.walk(root)?;
         let mut out = Vec::new();
-        while let Some(vb) = w.next().await {
-            out.push(vb?);
-        }
+        w.collect_into(&mut out).await?;
         Ok(out)
     }
 }
@@ -1263,16 +1803,32 @@ impl Walk {
         if self.done {
             return None;
         }
-        if let Err(e) = self.fill().await {
+        let mut buf = std::mem::take(&mut self.buf);
+        let r = self.fill(&mut buf).await;
+        self.buf = buf;
+        if let Err(e) = r {
             self.done = true;
             return Some(Err(e));
         }
         self.buf.pop_front().map(Ok)
     }
 
-    async fn fill(&mut self) -> Result<()> {
+    /// Every remaining binding into `out`.
+    async fn collect_into(&mut self, out: &mut Vec<VarBind>) -> Result<()> {
+        out.extend(self.buf.drain(..));
+        while !self.done {
+            if let Err(e) = self.fill(out).await {
+                self.done = true;
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    /// One request's worth of the subtree into `sink`.
+    async fn fill(&mut self, sink: &mut impl Extend<VarBind>) -> Result<()> {
         let c = &self.client;
-        let vbs = if c.version() == Version::V1 {
+        let mut vbs = if c.version() == Version::V1 {
             match c.get_next([self.cursor.clone()]).await {
                 Err(Error::Snmp {
                     status: ErrorStatus::NoSuchName,
@@ -1285,26 +1841,42 @@ impl Walk {
                 r => r?,
             }
         } else {
-            c.get_bulk(0, c.options.max_repetitions.max(1), [self.cursor.clone()])
-                .await?
+            c.checked(Pdu::get_bulk(
+                0,
+                0,
+                clamp_i32(c.options.max_repetitions.max(1)),
+                [self.cursor.clone()],
+            ))
+            .await?
         };
         if vbs.is_empty() {
             self.done = true;
         }
-        for vb in vbs {
+        let mut keep = vbs.len();
+        for i in 0..vbs.len() {
+            let vb = &vbs[i];
             if vb.value == Value::EndOfMibView || !vb.oid.starts_with(&self.root) {
                 self.done = true;
+                keep = i;
                 break;
             }
-            if vb.oid <= self.cursor {
+            let prev = if i == 0 {
+                &self.cursor
+            } else {
+                &vbs[i - 1].oid
+            };
+            if vb.oid <= *prev {
                 return Err(Error::NotIncreasing {
-                    previous: Box::new(self.cursor.clone()),
-                    next: Box::new(vb.oid),
+                    previous: Box::new(prev.clone()),
+                    next: Box::new(vb.oid.clone()),
                 });
             }
-            self.cursor = vb.oid.clone();
-            self.buf.push_back(vb);
         }
+        vbs.truncate(keep);
+        if let Some(last) = vbs.last() {
+            self.cursor = last.oid.clone();
+        }
+        sink.extend(vbs);
         Ok(())
     }
 }

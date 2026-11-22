@@ -25,6 +25,12 @@ async fn main() {
         c.walk_all("1.3.6.1.4.1.99999.1").await.unwrap();
     }
     println!("client: {:.1} ms CPU, {:.1} ms wall", (cpu_ns() - c0) as f64 / 1e6, t0.elapsed().as_secs_f64() * 1e3);
+    let (c0, t0) = (cpu_ns(), Instant::now());
+    let mut k = 0;
+    for _ in 0..n {
+        k += c.walk_with("1.3.6.1.4.1.99999.1", |vb| { std::hint::black_box(vb); }).await.unwrap();
+    }
+    println!("view:   {:.1} ms CPU, {:.1} ms wall ({k})", (cpu_ns() - c0) as f64 / 1e6, t0.elapsed().as_secs_f64() * 1e3);
 
     let sock = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     sock.connect("127.0.0.1:16100").await.unwrap();

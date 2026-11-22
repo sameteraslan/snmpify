@@ -45,6 +45,7 @@ def clients():
     py = lambda script: [str(PY), str(HERE / "python" / script)]
     return {
         "snmpify": [str(REL / "bench-snmpify")],
+        "snmpify (owned values)": ["env", "SNMPIFY_BENCH_OWNED=1", str(REL / "bench-snmpify")],
         "snmp2": [str(REL / "bench-snmp2")],
         "async-snmp": [str(REL / "bench-async-snmp")],
         "csnmp": [str(REL / "bench-csnmp")],

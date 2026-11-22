@@ -76,7 +76,7 @@ impl PduType {
         }
     }
 
-    fn from_tag(t: u8) -> Option<PduType> {
+    pub(crate) fn from_tag(t: u8) -> Option<PduType> {
         Some(match t {
             tag::GET_REQUEST => PduType::Get,
             tag::GET_NEXT_REQUEST => PduType::GetNext,
@@ -288,7 +288,14 @@ impl Pdu {
 
 fn decode_varbinds(r: &mut Reader<'_>) -> Result<Vec<VarBind>, DecodeError> {
     let mut list = r.read_sequence()?;
-    let mut v = Vec::new();
+    // Count first (headers only) so the vector is allocated once.
+    let mut probe = list;
+    let mut count = 0;
+    while !probe.is_empty() {
+        probe.read_any()?;
+        count += 1;
+    }
+    let mut v = Vec::with_capacity(count);
     while !list.is_empty() {
         v.push(VarBind::decode(&mut list)?);
     }
@@ -469,6 +476,17 @@ impl CommunityMessage {
             pdu,
         })
     }
+}
+
+/// Encodes a community message without copying the community.
+pub(crate) fn encode_community(version: Version, community: &[u8], pdu: &Pdu) -> Vec<u8> {
+    let mut w = Writer::with_capacity(48 + community.len() + pdu.varbinds.len() * 24);
+    let m = w.mark();
+    pdu.encode(&mut w);
+    w.octets(community);
+    w.integer(version.code() as i64);
+    w.wrap(m, tag::SEQUENCE);
+    w.finish()
 }
 
 /// The version of an encoded message, without decoding the rest.

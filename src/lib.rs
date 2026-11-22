@@ -55,6 +55,7 @@ mod tcp;
 pub mod usm;
 pub mod v3;
 mod value;
+pub mod view;
 
 pub use error::{DecodeError, DecodeErrorKind, ParseOidError};
 pub use oid::Oid;

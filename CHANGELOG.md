@@ -2,7 +2,20 @@
 
 ## Unreleased
 
+### Performance
+- The client reads its socket from the waiting request (no receive task;
+  no hand-off when nobody else waits), with one shared deadline sleep per
+  socket instead of a timer per request, header-only answer matching,
+  answers decoded where they lie, connected sockets for single-agent
+  clients, and an atomic in-flight counter. Decoding sizes vectors once and
+  parses one-byte OID arcs directly. A walk of 200 000 objects: 67 → 43 ms
+  CPU (in place), 47 ms (owned); now level with snmp2 and ahead of
+  net-snmp's C library.
+
 ### Added
+- `snmpify::view`: zero-copy views (`VarBindRef`, `ValueRef`, `OidRef`,
+  `Varbinds`, `community_pdu`) and `Client::walk_with`, a walk handing
+  each binding over in place.
 - SNMP over TCP (RFC 3430): `Client::connect_tcp` (no retransmissions;
   a closed connection fails pending requests with `Error::Io`),
   `Agent::run_tcp`, `blocking::Client::connect_tcp`, Python
