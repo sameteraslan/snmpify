@@ -291,6 +291,8 @@ fn priv_protocol(py: Python<'_>, s: &str) -> PyResult<PrivProtocol> {
             "AES" | "AES128" => PrivProtocol::Aes128,
             "AES192" => PrivProtocol::Aes192,
             "AES256" => PrivProtocol::Aes256,
+            "AES192C" => PrivProtocol::Aes192Cisco,
+            "AES256C" => PrivProtocol::Aes256Cisco,
             _ => return Err(invalid(py, format!("unknown privacy protocol {s:?}"))),
         },
     )
@@ -298,7 +300,8 @@ fn priv_protocol(py: Python<'_>, s: &str) -> PyResult<PrivProtocol> {
 
 /// An SNMPv3 user. ``auth`` and ``privacy`` are ``(protocol, password)``
 /// pairs: protocols MD5, SHA, SHA-224, SHA-256, SHA-384, SHA-512 and DES,
-/// AES (128), AES-192, AES-256. Passwords are hashed into keys once.
+/// AES (128), AES-192, AES-256, AES-192-C, AES-256-C (Cisco's key
+/// extension). Passwords are hashed into keys once.
 #[pyclass(frozen, module = "snmpify")]
 struct UsmUser {
     inner: snmpify::usm::UsmUser,

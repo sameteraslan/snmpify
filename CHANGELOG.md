@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- SNMPv3 privacy `PrivProtocol::Aes192Cisco` / `Aes256Cisco`: AES-192/256
+  with Cisco's key extension (draft-reeder; net-snmp's `AES-192-C`,
+  pysnmp's `usmAesCfb192Protocol`). Checked against pysnmp's keys and with
+  traps pysnmp encrypts that way. Python and C accept `"AES-192-C"`,
+  `"AES-256-C"`.
 - Benchmarks (`benchmarks/`): snmpify (Rust and Python) against snmp2,
   async-snmp, csnmp, net-snmp's C library, pysnmp and ezsnmp: walks
   (v2c and v3), GetRequest latency, mass polling, CPU and memory, with

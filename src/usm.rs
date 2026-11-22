@@ -286,10 +286,18 @@ pub enum PrivProtocol {
     /// CFB128-AES-256, key extension of draft-blumenthal-aes-usm-04
     /// (net-snmp's `AES-256`).
     Aes256,
+    /// CFB128-AES-192 with the key extension of
+    /// draft-reeder-snmpv3-usm-3desede-00, as Cisco devices do it
+    /// (net-snmp's `AES-192-C`, pysnmp's `usmAesCfb192Protocol`).
+    Aes192Cisco,
+    /// CFB128-AES-256, Cisco's key extension (net-snmp's `AES-256-C`).
+    Aes256Cisco,
 }
 
 impl PrivProtocol {
-    /// Every protocol.
+    /// The standard protocols (net-snmp's DES, AES, AES-192, AES-256);
+    /// [`Aes192Cisco`](Self::Aes192Cisco) and
+    /// [`Aes256Cisco`](Self::Aes256Cisco) are not in it.
     pub const ALL: [PrivProtocol; 4] = [
         PrivProtocol::Des,
         PrivProtocol::Aes128,
@@ -302,18 +310,28 @@ impl PrivProtocol {
     pub fn key_len(self) -> usize {
         match self {
             PrivProtocol::Des | PrivProtocol::Aes128 => 16,
-            PrivProtocol::Aes192 => 24,
-            PrivProtocol::Aes256 => 32,
+            PrivProtocol::Aes192 | PrivProtocol::Aes192Cisco => 24,
+            PrivProtocol::Aes256 | PrivProtocol::Aes256Cisco => 32,
         }
     }
 
     /// The localized privacy key: the localized key of the privacy
     /// password, extended when the hash is shorter than the cipher key
     /// (Kul ‖ H(Kul) ‖ H(Kul ‖ H(Kul)) …), then truncated.
+    ///
+    /// The Cisco variants extend it differently (draft-reeder): the key so
+    /// far is hashed into a master key like a password, then localized:
+    /// Kul ‖ localize(P2K(Kul)) ….
     pub fn localize(self, auth: AuthProtocol, master_key: &[u8], engine_id: &[u8]) -> Vec<u8> {
         let mut k = auth.localize(master_key, engine_id);
+        let cisco = matches!(self, PrivProtocol::Aes192Cisco | PrivProtocol::Aes256Cisco);
         while k.len() < self.key_len() {
-            let more = auth.digest(&k);
+            let more = if cisco {
+                let ku = with_hash!(auth, password_to_key(&k));
+                auth.localize(&ku, engine_id)
+            } else {
+                auth.digest(&k)
+            };
             k.extend_from_slice(&more);
         }
         k.truncate(self.key_len());
@@ -378,6 +396,8 @@ impl fmt::Display for PrivProtocol {
             PrivProtocol::Aes128 => "AES",
             PrivProtocol::Aes192 => "AES-192",
             PrivProtocol::Aes256 => "AES-256",
+            PrivProtocol::Aes192Cisco => "AES-192-C",
+            PrivProtocol::Aes256Cisco => "AES-256-C",
         })
     }
 }
@@ -443,8 +463,12 @@ fn aes_cfb(p: PrivProtocol, key: &[u8], iv: &[u8; 16], data: &mut [u8], decrypt:
     }
     match p {
         PrivProtocol::Aes128 => run::<aes::Aes128>(key, iv, data, decrypt),
-        PrivProtocol::Aes192 => run::<aes::Aes192>(key, iv, data, decrypt),
-        PrivProtocol::Aes256 => run::<aes::Aes256>(key, iv, data, decrypt),
+        PrivProtocol::Aes192 | PrivProtocol::Aes192Cisco => {
+            run::<aes::Aes192>(key, iv, data, decrypt)
+        }
+        PrivProtocol::Aes256 | PrivProtocol::Aes256Cisco => {
+            run::<aes::Aes256>(key, iv, data, decrypt)
+        }
         PrivProtocol::Des => unreachable!("DES is CBC"),
     }
 }

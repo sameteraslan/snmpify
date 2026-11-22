@@ -37,7 +37,8 @@
   v1, v2c and v3); the agent is queried with net-snmp's tools and runs
   as an AgentX subagent of snmpd.
 - **SNMPv3 done carefully.** MD5, SHA-1, SHA-224/256/384/512; DES,
-  AES-128/192/256. Answers count only if they authenticate at the
+  AES-128/192/256 (both key extensions in use: the Blumenthal draft's and
+  Cisco's). Answers count only if they authenticate at the
   request's level, for the right engine, inside the time window; forged,
   replayed and downgraded answers are dropped. Passwords are hashed into
   keys once per user, not once per agent.
