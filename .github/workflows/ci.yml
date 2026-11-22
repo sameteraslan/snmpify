@@ -74,6 +74,66 @@ jobs:
           docker logs snmpify-snmpd
           docker logs snmpify-snmptrapd
 
+  c-api:
+    # The C/C++ API (capi/): Rust-driven tests, CMake build and CTest on
+    # Linux, macOS and Windows; on Linux also install + consumers (CMake
+    # package and pkg-config, shared and static) and the tests against snmpd.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Clippy (snmpify-c)
+        if: runner.os == 'Linux'
+        run: cargo clippy -p snmpify-c --all-targets -- -D warnings
+      - name: Start snmpd
+        if: runner.os == 'Linux'
+        run: |
+          docker build -t snmpify-snmpd tools/snmpd
+          docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp snmpify-snmpd
+          sleep 2
+          echo "SNMPIFY_AGENT=127.0.0.1:1161" >> "$GITHUB_ENV"
+      - name: Rust-driven tests (C and C++ programs on the static library)
+        if: runner.os != 'Windows'
+        run: cargo test -p snmpify-c -- --nocapture
+      - name: CMake build and CTest
+        shell: bash
+        run: |
+          cmake -S capi -B build-capi -DSNMPIFY_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/install-capi"
+          cmake --build build-capi --config Release -j 4
+          ctest --test-dir build-capi -C Release --output-on-failure
+      - name: Install, then build against the CMake package and pkg-config
+        if: runner.os == 'Linux'
+        run: |
+          cmake --install build-capi
+          mkdir consumer
+          cat > consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.16)
+          project(consumer C CXX)
+          find_package(snmpify 0.1 REQUIRED)
+          add_executable(get ../capi/examples/get.c)
+          target_link_libraries(get PRIVATE snmpify::snmpify)
+          add_executable(walk ../capi/examples/walk.cpp)
+          set_target_properties(walk PROPERTIES CXX_STANDARD 17)
+          target_link_libraries(walk PRIVATE snmpify::static)
+          CMAKE
+          cmake -S consumer -B consumer/build -DCMAKE_PREFIX_PATH="$PWD/install-capi"
+          cmake --build consumer/build
+          consumer/build/get 127.0.0.1:1161 public sysName.0 | grep -q 'sysName.0 = snmpify-agent'
+          consumer/build/walk 127.0.0.1:1161 public IF-MIB::ifDescr | grep -q 'ifDescr.1 = lo'
+          export PKG_CONFIG_PATH="$PWD/install-capi/lib/pkgconfig"
+          cc -std=c99 capi/examples/get.c $(pkg-config --cflags --libs snmpify) -Wl,-rpath,"$PWD/install-capi/lib" -o consumer/get-pc
+          consumer/get-pc 127.0.0.1:1161 public sysName.0
+          cc -std=c99 capi/examples/trapd.c $(pkg-config --cflags snmpify) install-capi/lib/libsnmpify.a \
+            $(pkg-config --libs-only-l --static snmpify | sed 's/-lsnmpify//') -o consumer/trapd-static
+
   coverage:
     # Line coverage of every test, the snmpd interop tests included.
     runs-on: ubuntu-latest

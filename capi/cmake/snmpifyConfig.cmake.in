@@ -1,0 +1,44 @@
+# CMake package of the snmpify C/C++ library (relocatable).
+#
+#   find_package(snmpify 0.1 REQUIRED)
+#   target_link_libraries(app PRIVATE snmpify::snmpify)   # shared library
+#   target_link_libraries(app PRIVATE snmpify::static)    # static library
+#
+# Set SNMPIFY_STATIC to ON before find_package() to make snmpify::snmpify
+# the static library.
+@PACKAGE_INIT@
+
+set_and_check(SNMPIFY_INCLUDE_DIR "@PACKAGE_SNMPIFY_INSTALL_INCLUDEDIR@")
+set_and_check(SNMPIFY_LIBRARY_DIR "@PACKAGE_SNMPIFY_INSTALL_LIBDIR@")
+set(SNMPIFY_BINARY_DIR "@PACKAGE_SNMPIFY_INSTALL_BINDIR@")
+
+if(NOT TARGET snmpify::shared)
+  add_library(snmpify::shared SHARED IMPORTED)
+  if(WIN32)
+    set_target_properties(snmpify::shared PROPERTIES
+      IMPORTED_LOCATION "${SNMPIFY_BINARY_DIR}/@SNMPIFY_SHARED_NAME@"
+      IMPORTED_IMPLIB "${SNMPIFY_LIBRARY_DIR}/@SNMPIFY_IMPLIB_NAME@")
+  else()
+    set_target_properties(snmpify::shared PROPERTIES
+      IMPORTED_LOCATION "${SNMPIFY_LIBRARY_DIR}/@SNMPIFY_SHARED_NAME@"
+      IMPORTED_SONAME "@SNMPIFY_SHARED_NAME@"
+      INTERFACE_LINK_OPTIONS "LINKER:-rpath,${SNMPIFY_LIBRARY_DIR}")
+  endif()
+  set_target_properties(snmpify::shared PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${SNMPIFY_INCLUDE_DIR}")
+
+  add_library(snmpify::static STATIC IMPORTED)
+  set_target_properties(snmpify::static PROPERTIES
+    IMPORTED_LOCATION "${SNMPIFY_LIBRARY_DIR}/@SNMPIFY_STATIC_NAME@"
+    INTERFACE_INCLUDE_DIRECTORIES "${SNMPIFY_INCLUDE_DIR}"
+    INTERFACE_LINK_LIBRARIES "@SNMPIFY_STATIC_LIBS@")
+
+  add_library(snmpify::snmpify INTERFACE IMPORTED)
+  if(SNMPIFY_STATIC)
+    set_target_properties(snmpify::snmpify PROPERTIES INTERFACE_LINK_LIBRARIES snmpify::static)
+  else()
+    set_target_properties(snmpify::snmpify PROPERTIES INTERFACE_LINK_LIBRARIES snmpify::shared)
+  endif()
+endif()
+
+set(snmpify_LIBRARIES snmpify::snmpify)
+check_required_components(snmpify)

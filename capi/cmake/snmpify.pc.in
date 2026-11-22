@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/@SNMPIFY_PC_PREFIX_REL@
+libdir=${prefix}/@SNMPIFY_PC_LIBDIR@
+includedir=${prefix}/@SNMPIFY_PC_INCLUDEDIR@
+
+Name: snmpify
+Description: Fast, safe SNMP v1/v2c/v3 client, traps, agent and MIBs (C/C++ API of snmpify)
+Version: @PROJECT_VERSION@
+URL: https://github.com/snmp-rs/snmpify
+Libs: -L${libdir} -lsnmpify
+Libs.private: @SNMPIFY_PC_LIBS_PRIVATE@
+Cflags: -I${includedir}
