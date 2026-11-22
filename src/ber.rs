@@ -468,4 +468,22 @@ mod tests {
         // A huge declared length does not overflow.
         assert_eq!(kind(&[0x04, 0x84, 0xFF, 0xFF, 0xFF, 0xFF]), UnexpectedEnd);
     }
+
+    #[test]
+    fn null_and_short_oids() {
+        let mut r = Reader::new(&[0x05, 0x00, 0x05, 0x01, 0x00]);
+        assert!(r.read_null().is_ok());
+        assert_eq!(
+            r.read_null().unwrap_err().kind,
+            DecodeErrorKind::InvalidNull
+        );
+        let mut r = Reader::new(&[0x02, 0x01, 0x00]);
+        assert!(matches!(
+            r.read_null().unwrap_err().kind,
+            DecodeErrorKind::UnexpectedTag { .. }
+        ));
+        // One arc and none: encoded as the first sub-identifier alone.
+        assert_eq!(enc(|w| w.oid(&[2])), [0x06, 0x01, 80]);
+        assert_eq!(enc(|w| w.oid(&[])), [0x06, 0x00]);
+    }
 }

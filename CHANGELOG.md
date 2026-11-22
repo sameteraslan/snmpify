@@ -2,9 +2,36 @@
 
 ## Unreleased
 
-First code: the SNMP wire format and an async v1/v2c client.
+First code: the SNMP wire format and an async v1/v2c/v3 client.
 
 ### Added
+- SNMPv3 with the User-based Security Model.
+  - `snmpify::v3` (always available): `V3Message`, `UsmParams`,
+    `ScopedPdu`, `Message` (any version), `ReportKind` (usmStats and
+    snmpMPDStats reports).
+  - `snmpify::usm` (feature `v3`, on with `client`): `UsmUser` (master
+    keys hashed once from the passwords), `LocalizedUser::seal` / `open`.
+    Authentication HMAC-MD5-96, HMAC-SHA-96, HMAC-SHA-224/256/384/512
+    (RFC 3414, 7860); privacy DES, AES-128, AES-192/256 (RFC 3414, 3826,
+    the Blumenthal key extension as in net-snmp). Constant-time MAC check;
+    keys never in `Debug`.
+  - The client takes a `UsmUser` (or `Usm` with a context) wherever it
+    took a `Community`. Engine discovery once per agent for all clones,
+    time synchronisation and resync on notInTimeWindow, rediscovery when
+    the engine id changes. Answers are accepted only at the request's
+    security level, for its engine, within the time window: forged,
+    replayed, downgraded and altered answers are ignored. Reports become
+    `Error::Report`.
+  - Tested: RFC 3414 key vectors, HMAC/AES/DES known answers, every
+    protocol combination sealed and opened, tampering, a scripted v3 agent
+    (discovery, resync, reboot, engine change, forged answers, contexts,
+    40 agents over one socket), the robustness test and the fuzz target
+    on v3 input, and all 31 combinations against net-snmp's snmpd.
+  - `examples/codec_bench.rs` times seal/open per protocol and key
+    derivation.
+- CI: tests with `--no-default-features` (wire format only) and
+  `--features v3`; a coverage job (cargo-llvm-cov with the snmpd tests,
+  summary in the run, lcov as an artifact).
 - Minimum supported Rust version 1.85 (tokio needs it), checked in CI.
 - `client` (feature `client`, on by default; tokio): `Client` with `get`,
   `get_one`, `get_next`, `get_bulk`, `set`, `walk` (GetBulk in v2c, GetNext

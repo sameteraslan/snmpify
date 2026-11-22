@@ -582,4 +582,56 @@ mod tests {
             DecodeErrorKind::UnknownPdu(0xAF)
         );
     }
+
+    #[test]
+    fn trap_v2_inform_and_other_status() {
+        for t in [PduType::TrapV2, PduType::Inform, PduType::Report] {
+            let p = Pdu {
+                pdu_type: t,
+                ..Pdu::get(9, [SYS_DESCR])
+            };
+            let m = CommunityMessage::new(Version::V2c, "c", p);
+            assert_eq!(CommunityMessage::decode(&m.encode()).unwrap(), m);
+        }
+        assert_eq!(ErrorStatus::from_code(99), ErrorStatus::Other(99));
+        assert_eq!(ErrorStatus::Other(99).code(), 99);
+        assert_eq!(ErrorStatus::Other(99).to_string(), "error-status 99");
+    }
+
+    #[test]
+    fn rejects_bad_v1_traps() {
+        // enterprise, agent-addr, generic, specific, timestamp, varbinds
+        let trap = |oid: &[u8], addr: &[u8], ticks: &[u8]| {
+            let mut w = Writer::new();
+            let m = w.mark();
+            let t = w.mark();
+            let l = w.mark();
+            w.wrap(l, tag::SEQUENCE);
+            w.bytes(tag::TIMETICKS, ticks);
+            w.integer(0);
+            w.integer(1);
+            w.bytes(tag::IP_ADDRESS, addr);
+            w.bytes(tag::OBJECT_IDENTIFIER, oid);
+            w.wrap(t, tag::TRAP_V1);
+            w.octets(b"public");
+            w.integer(0);
+            w.wrap(m, tag::SEQUENCE);
+            w.finish()
+        };
+        let kind = |b: Vec<u8>| CommunityMessage::decode(&b).unwrap_err().kind;
+        let good = trap(&[0x2B, 6, 1], &[10, 0, 0, 1], &[5]);
+        assert!(CommunityMessage::decode(&good).is_ok());
+        assert_eq!(
+            kind(trap(&[0x2B, 0x80, 1], &[10, 0, 0, 1], &[5])),
+            DecodeErrorKind::InvalidOid
+        );
+        assert_eq!(
+            kind(trap(&[0x2B, 6, 1], &[10, 0, 1], &[5])),
+            DecodeErrorKind::InvalidIpAddress
+        );
+        assert_eq!(
+            kind(trap(&[0x2B, 6, 1], &[10, 0, 0, 1], &[1, 0, 0, 0, 0, 0])),
+            DecodeErrorKind::IntegerOverflow
+        );
+    }
 }

@@ -3,6 +3,8 @@ name = "snmpify"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
+# MSRV-aware dependency resolution (picks versions that build on 1.85).
+resolver = "3"
 description = "Fast SNMP for Rust: BER codec, v1/v2c/v3 messages, async client and trap receiver, with Python and C/C++ bindings."
 license = "MIT"
 repository = "https://github.com/snmp-rs/snmpify"
@@ -13,11 +15,40 @@ categories = ["network-programming", "encoding", "parser-implementations"]
 
 [features]
 default = ["client"]
-# The async client (tokio). Without it, only the wire format (no dependencies).
-client = ["dep:tokio"]
+# The async client (tokio), SNMPv1/v2c/v3.
+client = ["dep:tokio", "v3"]
+# SNMPv3 security (USM): key localisation, HMAC authentication, DES/AES
+# privacy. Without it and `client`, only the wire format (no dependencies).
+v3 = ["dep:hmac", "dep:md-5", "dep:sha1", "dep:sha2", "dep:aes", "dep:des"]
 
 [dependencies]
+hmac = { version = "0.13", optional = true }
+md-5 = { version = "0.11", optional = true }
+sha1 = { version = "0.11", optional = true }
+sha2 = { version = "0.11", optional = true }
+aes = { version = "0.9", optional = true }
+des = { version = "0.9", optional = true }
 tokio = { version = "1.38", features = ["net", "time", "sync", "rt"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.38", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }
+
+[[test]]
+name = "client_fake_agent"
+required-features = ["client"]
+
+[[test]]
+name = "v3_fake_agent"
+required-features = ["client"]
+
+[[test]]
+name = "decode_robustness"
+required-features = ["v3"]
+
+[[example]]
+name = "walk"
+required-features = ["client"]
+
+[[example]]
+name = "codec_bench"
+required-features = ["v3"]

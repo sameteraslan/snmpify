@@ -310,4 +310,22 @@ mod tests {
         assert_eq!(long.len(), 20);
         assert_eq!(Oid::from([1, 3]).child(&[6, 1]), Oid::from([1, 3, 6, 1]));
     }
+
+    #[test]
+    fn trait_impls() {
+        use std::collections::HashSet;
+        let a: Oid = "1.3.6.1.2".try_into().unwrap();
+        let b = Oid::from(&[1u32, 3, 6, 1, 2][..]);
+        assert_eq!(a, b);
+        assert_eq!(AsRef::<[u32]>::as_ref(&a), &[1, 3, 6, 1, 2]);
+        assert_eq!(format!("{a:?}"), "Oid(1.3.6.1.2)");
+        let set: HashSet<Oid> = [a.clone(), b, Oid::from(vec![1, 3])].into_iter().collect();
+        assert_eq!(set.len(), 2);
+        assert!(Oid::try_from("1..2").is_err());
+        // A long OID (heap storage) behaves the same.
+        let long: Vec<u32> = (0..40).collect();
+        let l = Oid::from(long.clone());
+        assert_eq!(l.as_slice(), &long[..]);
+        assert!(set.contains(&a) && !set.contains(&l));
+    }
 }
