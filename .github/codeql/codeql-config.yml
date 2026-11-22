@@ -4,5 +4,6 @@ paths-ignore:
   - tests
   - examples
   - fuzz
+  - benchmarks
   - src/usm/tests.rs
   - src/engine/tests.rs

@@ -404,3 +404,44 @@ async fn walk_ends_on_an_empty_answer() {
     assert!(c.walk_all("1.3.6.1").await.unwrap().is_empty());
     assert_eq!(a.requests.load(Ordering::SeqCst), 1);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn mass_polling_without_retries() {
+    // 500 agents answered at once would overflow the socket's receive
+    // buffer; the in-flight limit keeps every answer (no retries allowed).
+    let mut addrs = Vec::new();
+    for _ in 0..500 {
+        addrs.push(agent(Arc::new(|_, _, req| vec![answer(req)])).await.addr);
+    }
+    let m = Manager::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .with_options(Options {
+            timeout: Duration::from_secs(2),
+            retries: 0,
+            max_repetitions: 10,
+        });
+    let t = std::time::Instant::now();
+    let tasks: Vec<_> = addrs
+        .into_iter()
+        .map(|a| {
+            let c = m.client(a, Community::v2c("public"));
+            tokio::spawn(async move { c.get_one("1.3.6.1.2.1.1.5.0").await.is_ok() })
+        })
+        .collect();
+    let mut ok = 0;
+    for t in tasks {
+        ok += t.await.unwrap() as usize;
+    }
+    assert_eq!(ok, 500);
+    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    // A limit of one still works, one request at a time.
+    let one = m.clone().with_max_in_flight(1);
+    let a = agent(Arc::new(|_, _, req| vec![answer(req)])).await;
+    let c = one.client(a.addr, Community::v2c("public"));
+    let both = tokio::join!(
+        c.get_one("1.3.6.1.2.1.1.5.0"),
+        c.get_one("1.3.6.1.2.1.1.6.0")
+    );
+    assert!(both.0.is_ok() && both.1.is_ok());
+}

@@ -12,7 +12,7 @@ different library per language.
 | 4 | **Notifications**: trap (v1, v2c, v3) and inform receiver with acknowledgements; sending traps and informs | done |
 | 5 | **Python bindings** (PyO3, PyPI `snmpify`): sync and asyncio APIs, walks as iterators, values as Python types | done (wheels published on a `py-v*` tag) |
 | 6 | **C and C++ API**: blocking and callback APIs, CMake package, pkg-config, prebuilt Linux/macOS/Windows archives | done (prebuilt archives on a `c-v*` tag) |
-| 7 | **Benchmarks and comparisons**: walk throughput, request latency, mass polling, CPU and memory against net-snmp (C), pysnmp, ezsnmp/easysnmp, and the Rust crates snmp2, async-snmp, csnmp; reproducible scripts | |
+| 7 | **Benchmarks and comparisons**: walk throughput, request latency, mass polling, CPU and memory against net-snmp (C), pysnmp, ezsnmp/easysnmp, and the Rust crates snmp2, async-snmp, csnmp; reproducible scripts | done ([benchmarks/](benchmarks/README.md)) |
 | 8 | **Agent side**: a responder for custom MIB subtrees (sub-agent style), AgentX | done |
 | 9 | **MIBs**: name ↔ OID for the standard MIBs built in, loading MIB files | done |
 

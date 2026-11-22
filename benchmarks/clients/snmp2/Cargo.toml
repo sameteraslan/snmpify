@@ -1,0 +1,9 @@
+[package]
+name = "bench-snmp2"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+snmp2 = { version = "0.5", features = ["tokio", "crypto-rust"] }
+tokio = { version = "1", features = ["full"] }

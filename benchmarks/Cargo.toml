@@ -1,0 +1,9 @@
+# The benchmark programs: an agent and one client per Rust library. Kept
+# out of the main workspace (other SNMP crates are not snmpify's
+# dependencies). See README.md.
+[workspace]
+members = ["agent", "clients/*"]
+resolver = "2"
+
+[profile.release]
+debug = false

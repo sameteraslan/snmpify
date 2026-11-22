@@ -286,6 +286,12 @@ impl From<UsmUser> for Credentials {
     }
 }
 
+/// Requests a socket has in flight at most by default
+/// ([`Manager::with_max_in_flight`]). A burst of answers larger than the
+/// socket's receive buffer (about 200 datagrams with Linux defaults) is
+/// partly dropped and must be retried; waiting for a slot is far faster.
+pub const DEFAULT_MAX_IN_FLIGHT: usize = 64;
+
 /// Timeouts, retries and walk settings.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -349,6 +355,9 @@ struct Shared {
     check_source: bool,
     /// For sysUpTime.0 in notifications.
     start: Instant,
+    /// Requests in flight on the socket; more wait for a permit, so a burst
+    /// of answers does not overflow the socket's receive buffer.
+    in_flight: Mutex<Arc<tokio::sync::Semaphore>>,
 }
 
 impl Shared {
@@ -388,6 +397,7 @@ impl Transport {
             next_salt: AtomicU64::new(((seed as u64) << 32) ^ seed.rotate_left(7) as u64),
             check_source,
             start: Instant::now(),
+            in_flight: Mutex::new(Arc::new(tokio::sync::Semaphore::new(DEFAULT_MAX_IN_FLIGHT))),
         });
         let task = tokio::spawn(receive(shared.clone()));
         Ok(Arc::new(Transport { shared, task }))
@@ -568,6 +578,19 @@ impl Manager {
     /// The local address of the socket.
     pub fn local_addr(&self) -> Result<SocketAddr> {
         Ok(self.transport.shared.socket.local_addr()?)
+    }
+
+    /// At most `n` requests in flight on the socket at once (default
+    /// [`DEFAULT_MAX_IN_FLIGHT`]); more wait their turn. Raise it with
+    /// remote agents and a large receive buffer (`net.core.rmem_default`).
+    pub fn with_max_in_flight(self, n: usize) -> Self {
+        *self
+            .transport
+            .shared
+            .in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Arc::new(tokio::sync::Semaphore::new(n.max(1)));
+        self
     }
 
     /// A client for one agent; cheap (no socket of its own). With
@@ -768,6 +791,12 @@ impl Client {
     /// timeout.
     async fn exchange(&self, id: i32, bytes: &[u8], expect: Expect) -> Result<Reply> {
         let shared = &self.transport.shared;
+        let limit = shared
+            .in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let _permit = limit.acquire_owned().await.map_err(|_| Error::Timeout)?;
         let (tx, mut rx) = oneshot::channel();
         shared
             .pending

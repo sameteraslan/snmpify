@@ -189,6 +189,18 @@ async def test_asyncio(agent):
     assert "AsyncClient" in repr(c) and c.version == "3"
 
 
+async def test_manager_polls_many_agents(agent):
+    m = snmpify.Manager("127.0.0.1:0", timeout=0.5, max_in_flight=8)
+    assert m.address.startswith("127.0.0.1:")
+    clients = [m.client(agent.address) for _ in range(30)]
+    res = await asyncio.gather(*(c.get(f"{ENT}.20.1.{i + 1}") for i, c in enumerate(clients)))
+    assert res == [f"row {i + 1}".encode() for i in range(30)]
+    b = m.blocking_client(agent.address, user=ALICE)
+    assert b.get("1.3.6.1.2.1.1.5.0") == b"py-agent"
+    with pytest.raises(snmpify.InvalidArgument):
+        m.client("no-such-host.invalid")
+
+
 def test_notifications_sync():
     rx = snmpify.NotificationReceiver("127.0.0.1:0", communities=["public"], users=[ALICE])
     v2 = snmpify.Client(rx.address, community="public")
