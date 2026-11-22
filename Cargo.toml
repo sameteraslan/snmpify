@@ -69,3 +69,6 @@ required-features = ["client"]
 [[test]]
 name = "netsnmp_agent"
 required-features = ["client"]
+
+[[example]]
+name = "gen_builtin_mibs"

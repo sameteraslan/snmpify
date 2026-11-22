@@ -16,6 +16,9 @@ const SYS_DESCR: &str = "1.3.6.1.2.1.1.1.0";
 const SYS_OBJECT_ID: &str = "1.3.6.1.2.1.1.2.0";
 const SYS_UPTIME: &str = "1.3.6.1.2.1.1.3.0";
 const SYS_CONTACT: &str = "1.3.6.1.2.1.1.4.0";
+/// sysContact is the agent's only writable object: tests that set it and
+/// read it back take turns.
+static SYS_CONTACT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const SYS_NAME: &str = "1.3.6.1.2.1.1.5.0";
 const SYS_SERVICES: &str = "1.3.6.1.2.1.1.7.0";
 const IF_TABLE: &str = "1.3.6.1.2.1.2.2";
@@ -176,6 +179,7 @@ fn get_bulk_returns_table_rows() {
 #[test]
 fn set_needs_the_write_community() {
     let mut a = agent!();
+    let _turn = SYS_CONTACT_LOCK.blocking_lock();
     let value = format!("ops-{}", std::process::id());
     let id = a.id();
     let r = a.send(
@@ -257,6 +261,7 @@ mod client {
 
     #[tokio::test]
     async fn get_set_and_errors() {
+        let _turn = SYS_CONTACT_LOCK.lock().await;
         let c = client!(Community::v2c("public"));
         assert_eq!(
             c.get_one(SYS_NAME).await.unwrap(),
@@ -412,6 +417,7 @@ mod client {
 
     #[tokio::test]
     async fn v3_set_walk_and_bulk() {
+        let _turn = SYS_CONTACT_LOCK.lock().await;
         let addr = addr!();
         let c = Client::connect(
             &addr.to_string(),
@@ -521,5 +527,42 @@ mod client {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn standard_mibs_name_what_snmpd_serves() {
+        let c = client!(Community::v2c("public"));
+        let mib = snmpify::mib::Mib::standard();
+        let all = c.walk_all("1.3.6.1").await.unwrap();
+        let named = all
+            .iter()
+            .filter(|vb| {
+                mib.lookup(&vb.oid)
+                    .is_some_and(|(o, _)| !o.module.is_empty() && o.base.is_some())
+            })
+            .count();
+        // Everything snmpd serves is in the built-in modules, bar a few
+        // net-snmp extras.
+        assert!(named * 100 / all.len() >= 95, "{named} of {}", all.len());
+        let text = |oid: &str| {
+            let vb = all.iter().find(|vb| vb.oid.to_string() == oid).unwrap();
+            mib.format(vb)
+        };
+        assert_eq!(
+            text("1.3.6.1.2.1.1.5.0"),
+            "SNMPv2-MIB::sysName.0 = snmpify-agent"
+        );
+        assert_eq!(
+            text("1.3.6.1.2.1.1.2.0"),
+            "SNMPv2-MIB::sysObjectID.0 = NET-SNMP-TC::linux"
+        );
+        assert_eq!(
+            text("1.3.6.1.2.1.2.2.1.8.1"),
+            "IF-MIB::ifOperStatus.1 = up(1)"
+        );
+        assert_eq!(
+            text("1.3.6.1.2.1.2.2.1.3.1"),
+            "IF-MIB::ifType.1 = softwareLoopback(24)"
+        );
     }
 }

@@ -12,8 +12,9 @@
 > SNMPv1, v2c and v3 (get, get-next, get-bulk, set, walks, mass polling
 > over one socket; USM with every standard authentication and privacy
 > protocol), notifications (sending and receiving traps and informs in
-> every version), and the agent side (a v1/v2c/v3 agent and an AgentX
-> subagent), all tested against net-snmp. Next: MIBs and the Python and
+> every version), the agent side (a v1/v2c/v3 agent and an AgentX
+> subagent), and MIBs (55 standard modules built in, vendor MIB files
+> loaded at run time), all tested against net-snmp. Next: the Python and
 > C/C++ bindings; see the [roadmap](ROADMAP.md).
 
 ## Why snmpify
@@ -60,7 +61,7 @@ Rust crates, from their documentation (November 2026). ✓ = supported,
 | Walk / bulk walk helper | ✓ | ✓ | — | ✓ | — |
 | Traps and informs | send and receive | send and receive | parse received | send | — |
 | Agent | ✓ (and AgentX subagent) | ✓ | — | — | — |
-| MIB names | *planned* | ✓ (mib-rs) | ✓ (needs libnetsnmp) | — | — |
+| MIB names | ✓ (built in, MIB files) | ✓ (mib-rs) | ✓ (needs libnetsnmp) | — | — |
 | TCP transport | — | ✓ | — | — | — |
 | Wire format usable without the client | ✓ | — | ✓ | — | ✓ |
 | Python, C, C++ bindings | *planned* | — | — | — | — |
@@ -191,6 +192,22 @@ async fn main() -> std::io::Result<()> {
         .run()
         .await
 }
+```
+
+MIBs: `Mib::standard()` knows 55 standard modules (SNMPv2, IF, IP, TCP,
+UDP, HOST-RESOURCES, ENTITY, BRIDGE, BGP4, UCD-SNMP, the SNMPv3 MIBs …)
+without any file; `load_file` / `load_dir` add vendor MIBs (SMIv1 and
+SMIv2). Names resolve both ways and values print with enum labels and
+display hints:
+
+```rust
+use snmpify::mib::Mib;
+use snmpify::{Value, VarBind};
+
+let mib = Mib::standard();
+let oid = mib.resolve("IF-MIB::ifPhysAddress.2").unwrap();
+let vb = VarBind::new(oid, Value::OctetString(vec![0, 0x1b, 0x21, 0x3a, 0xc6, 8]));
+assert_eq!(mib.format(&vb), "IF-MIB::ifPhysAddress.2 = 00:1b:21:3a:c6:08");
 ```
 
 Polling many agents: `Manager::bind("0.0.0.0:0")` gives clients
