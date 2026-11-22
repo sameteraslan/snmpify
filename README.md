@@ -6,7 +6,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**Fast, safe SNMP for Rust, with Python and C/C++ bindings on the way.**
+**Fast, safe SNMP for Rust and Python, with C/C++ bindings on the way.**
 
 > **Status:** early. Done: the SNMP wire format, an async client for
 > SNMPv1, v2c and v3 (get, get-next, get-bulk, set, walks, mass polling
@@ -14,8 +14,9 @@
 > protocol), notifications (sending and receiving traps and informs in
 > every version), the agent side (a v1/v2c/v3 agent and an AgentX
 > subagent), and MIBs (55 standard modules built in, vendor MIB files
-> loaded at run time), all tested against net-snmp. Next: the Python and
-> C/C++ bindings; see the [roadmap](ROADMAP.md).
+> loaded at run time), all tested against net-snmp, and Python bindings
+> (`pip install snmpify`, blocking and asyncio). Next: the C/C++ API and
+> benchmarks; see the [roadmap](ROADMAP.md).
 
 ## Why snmpify
 
@@ -64,7 +65,8 @@ Rust crates, from their documentation (November 2026). ✓ = supported,
 | MIB names | ✓ (built in, MIB files) | ✓ (mib-rs) | ✓ (needs libnetsnmp) | — | — |
 | TCP transport | — | ✓ | — | — | — |
 | Wire format usable without the client | ✓ | — | ✓ | — | ✓ |
-| Python, C, C++ bindings | *planned* | — | — | — | — |
+| Python bindings | ✓ (sync and asyncio) | — | — | — | — |
+| C, C++ bindings | *planned* | — | — | — | — |
 | Last release | 2026 | 2026 | 2026 | 2024 | 2017 |
 
 [async-snmp]: https://crates.io/crates/async-snmp
@@ -214,6 +216,20 @@ Polling many agents: `Manager::bind("0.0.0.0:0")` gives clients
 (`manager.client(addr, community)`) that share one UDP socket and receive
 task; responses are matched by request id, source address and community,
 lost packets are retransmitted (`Options`: timeout 1 s, 2 retries).
+
+A blocking API for programs without async: `snmpify::blocking::Client`
+(same methods, plus `walk` as an iterator), `NotificationReceiver` and
+`RunningAgent`.
+
+From Python ([python/](python/README.md)):
+
+```python
+import snmpify
+
+c = snmpify.Client("192.0.2.1", user=snmpify.UsmUser("monitor", auth=("SHA-256", "auth-password")))
+for oid, value in c.walk("1.3.6.1.2.1.2.2.1.2"):
+    print(oid, value)
+```
 
 Only the wire format, without tokio: `default-features = false`, then
 `CommunityMessage::new(…).encode()` / `CommunityMessage::decode(bytes)`

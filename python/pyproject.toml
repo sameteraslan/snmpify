@@ -1,0 +1,43 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "snmpify"
+version = "0.1.0"
+description = "Fast, safe SNMP for Python: v1/v2c/v3 client (sync and asyncio), traps and informs, agent, MIBs, with a Rust core."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["snmp", "snmpv3", "network", "monitoring", "mib", "asyncio", "traps"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: System :: Networking :: Monitoring",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/snmp-rs/snmpify"
+Documentation = "https://github.com/snmp-rs/snmpify/tree/main/python"
+Repository = "https://github.com/snmp-rs/snmpify"
+Changelog = "https://github.com/snmp-rs/snmpify/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+python-source = "python"
+module-name = "snmpify._snmpify"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
