@@ -1,0 +1,16 @@
+[package]
+name = "snmpify"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+description = "Fast SNMP for Rust: BER codec, v1/v2c/v3 messages, async client and trap receiver, with Python and C/C++ bindings."
+license = "MIT"
+repository = "https://github.com/snmp-rs/snmpify"
+documentation = "https://docs.rs/snmpify"
+readme = "README.md"
+keywords = ["snmp", "network", "monitoring", "mib", "netsnmp"]
+categories = ["network-programming", "encoding", "parser-implementations"]
+
+[dependencies]
+
+[dev-dependencies]
