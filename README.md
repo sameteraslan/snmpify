@@ -114,20 +114,23 @@ on one machine over loopback, medians of 5 runs
 
 | | snmpify | snmp2 | async-snmp | csnmp | net-snmp (C) |
 |---|---:|---:|---:|---:|---:|
-| Walk, 200 000 objects (v2c): time | 165 ms | **139 ms** | 178 ms | 520 ms | 164 ms |
-| … CPU | 67 ms | **43 ms** | 79 ms | 396 ms | 60 ms |
-| Walk over SNMPv3 (SHA + AES): CPU | 88 ms | **68 ms** | 116 ms | n/a | 100 ms |
-| 1000 agents polled at once: time | **9 ms** | 86 ms | 4020 ms | 24 ms | 12 ms |
-| … peak memory | **4.8 MB** | 134 MB | 10 MB | 19 MB | 11 MB |
+| Walk, 200 000 objects (v2c): time | **134 ms** | 135 ms | 173 ms | 475 ms | 163 ms |
+| … CPU | **43 ms** | **43 ms** | 78 ms | 370 ms | 60 ms |
+| Walk over SNMPv3 (SHA + AES): CPU | **64 ms** | 72 ms | 116 ms | n/a | 100 ms |
+| 5000 GetRequests: CPU | 26 ms | 25 ms | 40 ms | 48 ms | **20 ms** |
+| 1000 agents polled at once: time | **8 ms** | 86 ms | 4020 ms | 27 ms | 12 ms |
+| … peak memory | **5.5 MB** | 134 MB | 10 MB | 18 MB | 11 MB |
 
 | Python | snmpify | ezsnmp | pysnmp |
 |---|---:|---:|---:|
-| Walk, 200 000 objects | **304 ms** | 2402 ms | 20 011 ms |
-| GetRequest latency (p50) | **11 µs** | 15 µs | 424 µs |
-| 1000 agents polled at once | **29 ms** | 171 ms | 4236 ms (663 answered) |
+| Walk, 200 000 objects | **248 ms** | 2421 ms | 19 548 ms |
+| GetRequest latency (p50) | **11 µs** | 16 µs | 422 µs |
+| 1000 agents polled at once | **31 ms** | 163 ms | 4255 ms (663 answered) |
 
-snmp2 walks with the least CPU (it decodes in place); snmpify is at
-net-snmp's level there, and leads mass polling and Python.
+snmpify walks as fast as the leanest Rust client (snmp2, which has no
+timeouts or request matching of its own), leads mass polling and SNMPv3,
+and is the fastest from Python. Walks read the answers in place
+(`Client::walk_with`); owned values (`walk_all`) cost about 10% more.
 
 ## Example
 

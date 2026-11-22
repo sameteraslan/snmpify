@@ -51,6 +51,7 @@ pub struct Reader<'a> {
 
 impl<'a> Reader<'a> {
     /// A reader over `buf`.
+    #[inline]
     pub fn new(buf: &'a [u8]) -> Self {
         Self {
             buf,
@@ -60,20 +61,24 @@ impl<'a> Reader<'a> {
     }
 
     /// Whether every byte has been consumed.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.pos >= self.buf.len()
     }
 
     /// Absolute offset of the next byte.
+    #[inline]
     pub fn position(&self) -> usize {
         self.base + self.pos
     }
 
+    #[inline]
     fn err(&self, kind: DecodeErrorKind) -> DecodeError {
         DecodeError::new(kind, self.position())
     }
 
     /// The tag of the next element, without consuming it.
+    #[inline]
     pub fn peek_tag(&self) -> Result<u8, DecodeError> {
         self.buf
             .get(self.pos)
@@ -82,6 +87,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Reads one TLV and returns its tag and contents.
+    #[inline]
     pub fn read_any(&mut self) -> Result<(u8, Reader<'a>), DecodeError> {
         let start = self.pos;
         let tag = self.peek_tag()?;
@@ -130,6 +136,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Reads one TLV that must have the tag `expected`.
+    #[inline]
     pub fn read_tagged(&mut self, expected: u8) -> Result<Reader<'a>, DecodeError> {
         let at = self.position();
         let (t, inner) = self.read_any()?;
@@ -143,16 +150,19 @@ impl<'a> Reader<'a> {
     }
 
     /// The remaining bytes.
+    #[inline]
     pub fn rest(&self) -> &'a [u8] {
         &self.buf[self.pos.min(self.buf.len())..]
     }
 
     /// Reads a SEQUENCE and returns a reader over its contents.
+    #[inline]
     pub fn read_sequence(&mut self) -> Result<Reader<'a>, DecodeError> {
         self.read_tagged(tag::SEQUENCE)
     }
 
     /// Reads an INTEGER that fits in an `i32` (SNMP's Integer32).
+    #[inline]
     pub fn read_i32(&mut self) -> Result<i32, DecodeError> {
         let at = self.position();
         let r = self.read_tagged(tag::INTEGER)?;
@@ -161,11 +171,13 @@ impl<'a> Reader<'a> {
     }
 
     /// Reads an OCTET STRING.
+    #[inline]
     pub fn read_octets(&mut self) -> Result<&'a [u8], DecodeError> {
         Ok(self.read_tagged(tag::OCTET_STRING)?.rest())
     }
 
     /// Reads a NULL.
+    #[inline]
     pub fn read_null(&mut self) -> Result<(), DecodeError> {
         let at = self.position();
         let r = self.read_tagged(tag::NULL)?;
@@ -176,6 +188,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Fails unless every byte was consumed.
+    #[inline]
     pub fn finish(&self) -> Result<(), DecodeError> {
         if self.is_empty() {
             Ok(())
@@ -187,6 +200,7 @@ impl<'a> Reader<'a> {
 
 /// Decodes a two's-complement big-endian integer of 1–8 content bytes
 /// (9 when the first is a 0x00 sign pad).
+#[inline]
 pub fn decode_signed(bytes: &[u8]) -> Result<i64, DecodeErrorKind> {
     if bytes.is_empty() {
         return Err(DecodeErrorKind::EmptyInteger);
@@ -204,6 +218,7 @@ pub fn decode_signed(bytes: &[u8]) -> Result<i64, DecodeErrorKind> {
 /// Decodes an unsigned integer (Counter32/Gauge32/TimeTicks/Counter64).
 /// Accepts a leading 0x00 pad and, like net-snmp, a value encoded as a
 /// negative number by a sloppy agent (taken modulo 2^bits).
+#[inline]
 pub fn decode_unsigned(bytes: &[u8], bits: u32) -> Result<u64, DecodeErrorKind> {
     if bytes.is_empty() {
         return Err(DecodeErrorKind::EmptyInteger);
@@ -246,11 +261,13 @@ pub struct Writer {
 
 impl Writer {
     /// An empty writer.
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// An empty writer with room for `n` bytes.
+    #[inline]
     pub fn with_capacity(n: usize) -> Self {
         Self {
             rev: Vec::with_capacity(n),
@@ -258,10 +275,12 @@ impl Writer {
     }
 
     /// Current length; pass it to [`wrap`](Self::wrap).
+    #[inline]
     pub fn mark(&self) -> usize {
         self.rev.len()
     }
 
+    #[inline]
     fn push_len(&mut self, len: usize) {
         if len < 0x80 {
             self.rev.push(len as u8);
@@ -278,6 +297,7 @@ impl Writer {
     }
 
     /// Writes the header of a value whose contents were written since `mark`.
+    #[inline]
     pub fn wrap(&mut self, mark: usize, tag: u8) {
         let len = self.rev.len() - mark;
         self.push_len(len);
@@ -285,6 +305,7 @@ impl Writer {
     }
 
     /// Writes raw contents bytes (in normal order) with a tag.
+    #[inline]
     pub fn bytes(&mut self, tag: u8, data: &[u8]) {
         self.rev.extend(data.iter().rev());
         self.push_len(data.len());
@@ -292,6 +313,7 @@ impl Writer {
     }
 
     /// Writes a signed integer with the given tag (minimal encoding).
+    #[inline]
     pub fn signed(&mut self, tag: u8, v: i64) {
         let m = self.mark();
         let mut v = v;
@@ -309,6 +331,7 @@ impl Writer {
 
     /// Writes an unsigned integer with the given tag (minimal encoding,
     /// 0x00 pad when the top bit is set).
+    #[inline]
     pub fn unsigned(&mut self, tag: u8, v: u64) {
         let m = self.mark();
         let mut v = v;
@@ -327,22 +350,26 @@ impl Writer {
     }
 
     /// Writes an INTEGER.
+    #[inline]
     pub fn integer(&mut self, v: i64) {
         self.signed(tag::INTEGER, v);
     }
 
     /// Writes an OCTET STRING.
+    #[inline]
     pub fn octets(&mut self, data: &[u8]) {
         self.bytes(tag::OCTET_STRING, data);
     }
 
     /// Writes a NULL (or another empty primitive, e.g. noSuchObject).
+    #[inline]
     pub fn empty(&mut self, tag: u8) {
         self.rev.push(0);
         self.rev.push(tag);
     }
 
     /// Writes OID sub-identifiers as contents with the given tag.
+    #[inline]
     pub fn oid(&mut self, arcs: &[u32]) {
         let m = self.mark();
         if arcs.len() >= 2 {
@@ -356,6 +383,7 @@ impl Writer {
         self.wrap(m, tag::OBJECT_IDENTIFIER);
     }
 
+    #[inline]
     fn base128(&mut self, mut v: u64) {
         self.rev.push((v & 0x7F) as u8);
         v >>= 7;
@@ -366,6 +394,7 @@ impl Writer {
     }
 
     /// The encoding, in normal order.
+    #[inline]
     pub fn finish(mut self) -> Vec<u8> {
         self.rev.reverse();
         self.rev

@@ -28,18 +28,30 @@ async fn main() {
                 Client::connect(&target, u).await.unwrap()
             }
             .with_options(opts);
+            // In place (like snmp2's client), or owned values with
+            // SNMPIFY_BENCH_OWNED=1.
+            let owned = std::env::var_os("SNMPIFY_BENCH_OWNED").is_some();
             let mut n = 0;
             for _ in 0..a.n {
-                n += c.walk_all(TABLE).await.unwrap().len();
+                n += if owned {
+                    c.walk_all(TABLE).await.unwrap().len()
+                } else {
+                    c.walk_with(TABLE, |vb| {
+                        std::hint::black_box(vb);
+                    })
+                    .await
+                    .unwrap()
+                };
             }
             report(n, t.elapsed().as_secs_f64() * 1e3, &mut []);
         }
         "get" => {
             let c = Client::connect(&target, Community::v2c("public")).await.unwrap();
+            let o: snmpify::Oid = SYS_NAME.parse().unwrap();
             let mut lat = Vec::with_capacity(a.n);
             for _ in 0..a.n {
                 let s = Instant::now();
-                c.get_one(SYS_NAME).await.unwrap();
+                c.get_one(&o).await.unwrap();
                 lat.push(s.elapsed().as_secs_f64() * 1e6);
             }
             report(a.n, t.elapsed().as_secs_f64() * 1e3, &mut lat);

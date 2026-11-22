@@ -522,8 +522,19 @@ async fn walks_over_v3() {
     let c = client(&a, alice()).await;
     let all = c.walk_all("1.3.6.1.9").await.unwrap();
     assert_eq!(all.len(), 25);
-    // Probe + 3 bulks of 10.
-    assert_eq!(a.requests.load(Ordering::SeqCst), 4);
+    // The same through views (SNMPv3 goes through the owned decoder).
+    let mut seen = Vec::new();
+    let n = c
+        .walk_with("1.3.6.1.9", |vb| seen.push(vb.oid.to_oid().unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(n, 25);
+    assert_eq!(
+        seen,
+        all.iter().map(|vb| vb.oid.clone()).collect::<Vec<_>>()
+    );
+    // Probe + 3 bulks of 10, twice.
+    assert_eq!(a.requests.load(Ordering::SeqCst), 7);
 }
 
 #[tokio::test]

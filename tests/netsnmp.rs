@@ -323,6 +323,20 @@ mod client {
         let all = v2.walk_all("1.3.6.1").await.unwrap();
         assert!(all.len() > 1000, "{}", all.len());
         assert!(all.windows(2).all(|w| w[0].oid < w[1].oid));
+        // In place, the same objects (values may move).
+        let mut names = Vec::new();
+        v2.walk_with("1.3.6.1", |vb| names.push(vb.oid.to_oid().unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(names.len(), all.len());
+        let mut v1_names = Vec::new();
+        v1.walk_with(IF_TABLE, |vb| v1_names.push(vb.oid.to_oid().unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(
+            v1_names,
+            next.iter().map(|vb| vb.oid.clone()).collect::<Vec<_>>()
+        );
     }
 
     // -----------------------------------------------------------------------

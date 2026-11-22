@@ -445,3 +445,143 @@ async fn mass_polling_without_retries() {
     );
     assert!(both.0.is_ok() && both.1.is_ok());
 }
+
+#[tokio::test]
+async fn walk_with_reads_in_place() {
+    for community in [Community::v1("public"), Community::v2c("public")] {
+        let a = agent(table_agent(10, false)).await;
+        let c = client(&a, community).await;
+        let mut seen = Vec::new();
+        let n = c
+            .walk_with("1.3.6.1.9", |vb| {
+                seen.push((vb.oid.to_oid().unwrap(), vb.value.as_u64().unwrap()));
+            })
+            .await
+            .unwrap();
+        assert_eq!(n, 10);
+        let owned = c.walk_all("1.3.6.1.9").await.unwrap();
+        let owned: Vec<_> = owned
+            .iter()
+            .map(|vb| (vb.oid.clone(), vb.value.as_u64().unwrap()))
+            .collect();
+        assert_eq!(seen, owned);
+        assert_eq!(c.walk_with("1.3.6.1.8", |_| {}).await.unwrap(), 0);
+    }
+    // A looping agent is caught here too.
+    let a = agent(table_agent(10, true)).await;
+    let c = client(&a, Community::v2c("public")).await;
+    assert!(matches!(
+        c.walk_with("1.3.6.1.9", |_| {}).await,
+        Err(Error::NotIncreasing { .. })
+    ));
+    // An error status from the agent.
+    let a = agent(Arc::new(|_, _, req| {
+        vec![Reply::Pdu {
+            pdu: Pdu {
+                error_status: ErrorStatus::GenErr.code(),
+                error_index: 1,
+                ..response(req.varbinds.clone())
+            },
+            community: None,
+            keep_id: false,
+        }]
+    }))
+    .await;
+    let c = client(&a, Community::v2c("public")).await;
+    assert!(matches!(
+        c.walk_with("1.3.6.1.9", |_| {}).await,
+        Err(Error::Snmp {
+            status: ErrorStatus::GenErr,
+            ..
+        })
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn readers_and_waiters_retry_and_time_out() {
+    // Every request's first copy is dropped: the request reading the
+    // socket and those waiting must all retry, and all get their answer.
+    let seen = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    let s2 = seen.clone();
+    let a = agent(Arc::new(move |_, _, req| {
+        if s2.lock().unwrap().insert(req.request_id) {
+            vec![]
+        } else {
+            vec![answer(req)]
+        }
+    }))
+    .await;
+    let m = Manager::bind("127.0.0.1:0")
+        .await
+        .unwrap()
+        .with_options(Options {
+            timeout: Duration::from_millis(100),
+            retries: 2,
+            max_repetitions: 5,
+        });
+    let tasks: Vec<_> = (0..20u32)
+        .map(|i| {
+            let c = m.client(a.addr, Community::v2c("public"));
+            tokio::spawn(async move { c.get_one(format!("1.3.6.1.4.1.{i}.0").as_str()).await })
+        })
+        .collect();
+    for t in tasks {
+        assert!(t.await.unwrap().is_ok());
+    }
+
+    // A short timeout waiting behind a long one, on an agent that never
+    // answers: the short one still times out on time (the reader re-arms
+    // for the earlier deadline).
+    let silent = agent(Arc::new(|_, _, _| vec![])).await;
+    let long = m
+        .client(silent.addr, Community::v2c("public"))
+        .with_options(Options {
+            timeout: Duration::from_secs(5),
+            retries: 0,
+            max_repetitions: 5,
+        });
+    let short = m
+        .client(silent.addr, Community::v2c("public"))
+        .with_options(Options {
+            timeout: Duration::from_millis(50),
+            retries: 1,
+            max_repetitions: 5,
+        });
+    let l = tokio::spawn(async move { long.get_one("1.3.6.1.2.1.1.5.0").await });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let t = std::time::Instant::now();
+    assert!(matches!(
+        short.get_one("1.3.6.1.2.1.1.5.0").await,
+        Err(Error::Timeout)
+    ));
+    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    l.abort();
+    // And the other way round: the short one reads, the long one waits.
+    let long = m
+        .client(silent.addr, Community::v2c("public"))
+        .with_options(Options {
+            timeout: Duration::from_millis(400),
+            retries: 0,
+            max_repetitions: 5,
+        });
+    let short = m
+        .client(silent.addr, Community::v2c("public"))
+        .with_options(Options {
+            timeout: Duration::from_millis(50),
+            retries: 0,
+            max_repetitions: 5,
+        });
+    let s = tokio::spawn(async move { short.get_one("1.3.6.1.2.1.1.5.0").await });
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let t = std::time::Instant::now();
+    assert!(matches!(
+        long.get_one("1.3.6.1.2.1.1.5.0").await,
+        Err(Error::Timeout)
+    ));
+    assert!(
+        t.elapsed() >= Duration::from_millis(350),
+        "{:?}",
+        t.elapsed()
+    );
+    assert!(matches!(s.await.unwrap(), Err(Error::Timeout)));
+}

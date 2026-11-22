@@ -80,10 +80,46 @@ impl Oid {
         if bytes.is_empty() {
             return Err(DecodeErrorKind::InvalidOid);
         }
+        /// One sub-identifier: one byte in the common case, else base 128.
+        #[inline(always)]
+        fn subid(bytes: &[u8], i: &mut usize) -> Result<u64, DecodeErrorKind> {
+            let b = bytes[*i];
+            *i += 1;
+            if b < 0x80 {
+                return Ok(b as u64);
+            }
+            if b == 0x80 {
+                return Err(DecodeErrorKind::InvalidOid); // non-minimal
+            }
+            let mut v = (b & 0x7F) as u64;
+            loop {
+                let b = *bytes.get(*i).ok_or(DecodeErrorKind::InvalidOid)?; // unterminated
+                *i += 1;
+                v = (v << 7) | (b & 0x7F) as u64;
+                if v > u32::MAX as u64 + 80 {
+                    return Err(DecodeErrorKind::InvalidOid);
+                }
+                if b < 0x80 {
+                    return Ok(v);
+                }
+            }
+        }
         let mut arcs = [0u32; INLINE];
-        let mut heap: Vec<u32> = Vec::new();
         let mut n = 0usize;
-        let mut push = |a: u32| {
+        let mut heap: Vec<u32> = Vec::new();
+        let mut i = 0;
+        let first = subid(bytes, &mut i)?;
+        let (x, y) = match first {
+            0..=39 => (0, first),
+            40..=79 => (1, first - 40),
+            _ => (2, first - 80),
+        };
+        arcs[0] = x;
+        arcs[1] = u32::try_from(y).map_err(|_| DecodeErrorKind::InvalidOid)?;
+        n += 2;
+        while i < bytes.len() {
+            let a =
+                u32::try_from(subid(bytes, &mut i)?).map_err(|_| DecodeErrorKind::InvalidOid)?;
             if n < INLINE {
                 arcs[n] = a;
             } else {
@@ -93,38 +129,6 @@ impl Oid {
                 heap.push(a);
             }
             n += 1;
-        };
-        let mut v: u64 = 0;
-        let mut first = true;
-        let mut start = true;
-        for &b in bytes {
-            if start && b == 0x80 {
-                return Err(DecodeErrorKind::InvalidOid); // non-minimal
-            }
-            start = false;
-            v = (v << 7) | (b & 0x7F) as u64;
-            if v > u32::MAX as u64 + 80 {
-                return Err(DecodeErrorKind::InvalidOid);
-            }
-            if b & 0x80 == 0 {
-                if first {
-                    let (x, y) = match v {
-                        0..=39 => (0, v),
-                        40..=79 => (1, v - 40),
-                        _ => (2, v - 80),
-                    };
-                    push(x);
-                    push(u32::try_from(y).map_err(|_| DecodeErrorKind::InvalidOid)?);
-                    first = false;
-                } else {
-                    push(u32::try_from(v).map_err(|_| DecodeErrorKind::InvalidOid)?);
-                }
-                v = 0;
-                start = true;
-            }
-        }
-        if !start {
-            return Err(DecodeErrorKind::InvalidOid); // last arc unterminated
         }
         Ok(if n <= INLINE {
             Oid(Repr::Inline { len: n as u8, arcs })

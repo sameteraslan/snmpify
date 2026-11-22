@@ -7,3 +7,6 @@ publish = false
 [dependencies]
 snmpify = { path = "../../.." }
 tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+pprof = { version = "0.14", features = ["flamegraph"] }
