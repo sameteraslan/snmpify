@@ -228,3 +228,95 @@ fn walks_the_whole_agent() {
     }
     assert!(count > 1000, "{count}");
 }
+
+// ---------------------------------------------------------------------------
+// The async client against snmpd
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "client")]
+mod client {
+    use super::*;
+    use snmpify::client::{Client, Community, Error, Options};
+
+    async fn client(community: Community) -> Option<Client> {
+        let addr = std::env::var("SNMPIFY_AGENT").ok()?;
+        Some(Client::connect(&addr, community).await.unwrap())
+    }
+
+    macro_rules! client {
+        ($c:expr) => {
+            match client($c).await {
+                Some(c) => c,
+                None => {
+                    eprintln!("SNMPIFY_AGENT not set; skipped");
+                    return;
+                }
+            }
+        };
+    }
+
+    #[tokio::test]
+    async fn get_set_and_errors() {
+        let c = client!(Community::v2c("public"));
+        assert_eq!(
+            c.get_one(SYS_NAME).await.unwrap(),
+            Value::from("snmpify-agent")
+        );
+        let vbs = c
+            .get([SYS_DESCR, SYS_SERVICES, "1.3.6.1.2.1.1.99.0"])
+            .await
+            .unwrap();
+        assert!(vbs[0].value.as_str().unwrap().starts_with("Linux"));
+        assert_eq!(vbs[1].value, Value::Integer(72));
+        assert_eq!(vbs[2].value, Value::NoSuchObject);
+
+        let w = client!(Community::v2c("private"));
+        let contact = format!("client-{}", std::process::id());
+        w.set(vec![VarBind::new(oid(SYS_CONTACT), contact.as_str())])
+            .await
+            .unwrap();
+        assert_eq!(
+            c.get_one(SYS_CONTACT).await.unwrap(),
+            Value::from(contact.as_str())
+        );
+        match c.set(vec![VarBind::new(oid(SYS_CONTACT), "x")]).await {
+            Err(Error::Snmp { status, index, .. }) => {
+                assert_eq!(status, ErrorStatus::NoAccess);
+                assert_eq!(index, 1);
+            }
+            r => panic!("{r:?}"),
+        }
+
+        let v1 = client!(Community::v1("public"));
+        assert!(matches!(
+            v1.get_one("1.3.6.1.2.1.1.99.0").await,
+            Err(Error::Snmp {
+                status: ErrorStatus::NoSuchName,
+                ..
+            })
+        ));
+        // A wrong community gets no answer at all.
+        let bad = client!(Community::v2c("wrong")).with_options(Options {
+            timeout: std::time::Duration::from_millis(200),
+            retries: 0,
+            ..Options::default()
+        });
+        assert!(matches!(bad.get_one(SYS_NAME).await, Err(Error::Timeout)));
+    }
+
+    #[tokio::test]
+    async fn walks_match_between_versions_and_methods() {
+        let v2 = client!(Community::v2c("public"));
+        let v1 = client!(Community::v1("public"));
+        let bulk = v2.walk_all(IF_TABLE).await.unwrap();
+        let next = v1.walk_all(IF_TABLE).await.unwrap();
+        assert!(!bulk.is_empty());
+        // Same objects (values such as counters may move between the walks).
+        let names = |v: &[VarBind]| v.iter().map(|vb| vb.oid.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&bulk), names(&next));
+        // The whole agent, in order, ends cleanly.
+        let all = v2.walk_all("1.3.6.1").await.unwrap();
+        assert!(all.len() > 1000, "{}", all.len());
+        assert!(all.windows(2).all(|w| w[0].oid < w[1].oid));
+    }
+}

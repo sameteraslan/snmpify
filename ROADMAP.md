@@ -7,7 +7,7 @@ different library per language.
 | Step | What | Status |
 |---|---|---|
 | 1 | **Wire format**: BER codec, OIDs, values, all PDUs, v1/v2c messages; robustness tests, fuzzing, interop tests against net-snmp | in progress |
-| 2 | **Async client** (tokio): get, get-next, get-bulk, set, walk and bulk walk as streams, timeouts and retries, request-id matching; one socket shared by thousands of targets for mass polling; a blocking wrapper | |
+| 2 | **Async client** (tokio): get, get-next, get-bulk, set, walk and bulk walk as streams, timeouts and retries, request-id matching; one socket shared by thousands of targets for mass polling; a blocking wrapper | in progress |
 | 3 | **SNMPv3 / USM**: engine discovery and time sync, authentication MD5, SHA-1, SHA-224/256/384/512 (RFC 3414, 7860), privacy DES, AES-128/192/256 (RFC 3826 and the common 192/256 extension); key localisation cache; tested against snmpd for every combination | |
 | 4 | **Notifications**: trap (v1, v2c, v3) and inform receiver with acknowledgements; sending traps and informs | |
 | 5 | **Python bindings** (PyO3, PyPI `snmpify`): sync and asyncio APIs, walks as iterators, values as Python types | |
