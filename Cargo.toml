@@ -53,3 +53,11 @@ required-features = ["client"]
 [[example]]
 name = "codec_bench"
 required-features = ["v3"]
+
+[[test]]
+name = "notifications"
+required-features = ["client"]
+
+[[test]]
+name = "netsnmp_notifications"
+required-features = ["client"]

@@ -59,14 +59,19 @@ jobs:
         run: |
           docker build -t snmpify-snmpd tools/snmpd
           docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp snmpify-snmpd
+          docker run -d --name snmpify-snmptrapd -p 127.0.0.1:1162:162/udp \
+            --entrypoint /usr/sbin/snmptrapd snmpify-snmpd -f -Lo -C -c /etc/snmp/snmptrapd.conf
           sleep 2
-      - name: Tests against snmpd
-        run: cargo test --test netsnmp -- --nocapture
+      - name: Tests against snmpd and snmptrapd
+        run: cargo test --test netsnmp --test netsnmp_notifications -- --nocapture
         env:
           SNMPIFY_AGENT: 127.0.0.1:1161
-      - name: snmpd log
+          SNMPIFY_TRAPD: 127.0.0.1:1162
+      - name: snmpd and snmptrapd logs
         if: failure()
-        run: docker logs snmpify-snmpd
+        run: |
+          docker logs snmpify-snmpd
+          docker logs snmpify-snmptrapd
 
   coverage:
     # Line coverage of every test, the snmpd interop tests included.
@@ -85,10 +90,13 @@ jobs:
         run: |
           docker build -t snmpify-snmpd tools/snmpd
           docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp snmpify-snmpd
+          docker run -d --name snmpify-snmptrapd -p 127.0.0.1:1162:162/udp \
+            --entrypoint /usr/sbin/snmptrapd snmpify-snmpd -f -Lo -C -c /etc/snmp/snmptrapd.conf
           sleep 2
       - name: Measure
         env:
           SNMPIFY_AGENT: 127.0.0.1:1161
+          SNMPIFY_TRAPD: 127.0.0.1:1162
         run: |
           cargo llvm-cov --all-targets --lcov --output-path lcov.info
           {

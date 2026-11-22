@@ -8,11 +8,12 @@
 
 **Fast, safe SNMP for Rust, with Python and C/C++ bindings on the way.**
 
-> **Status:** early. Done: the SNMP wire format and an async client for
+> **Status:** early. Done: the SNMP wire format, an async client for
 > SNMPv1, v2c and v3 (get, get-next, get-bulk, set, walks, mass polling
 > over one socket; USM with every standard authentication and privacy
-> protocol), tested against net-snmp. Traps and the Python and C/C++
-> bindings follow; see the [roadmap](ROADMAP.md).
+> protocol), and notifications (sending and receiving traps and informs
+> in every version), all tested against net-snmp. Next: the agent, MIBs,
+> and the Python and C/C++ bindings; see the [roadmap](ROADMAP.md).
 
 ## Why snmpify
 
@@ -26,7 +27,9 @@
   allocation.
 - **Interoperable.** Every change is tested against net-snmp's `snmpd`
   (Get, GetNext, GetBulk, Set, v1 and v2c error handling, a full walk,
-  and SNMPv3 with all 31 combinations of authentication and privacy).
+  and SNMPv3 with all 31 combinations of authentication and privacy) and
+  `snmptrapd` / `snmptrap` / `snmpinform` (traps and informs both ways,
+  v1, v2c and v3).
 - **SNMPv3 done carefully.** MD5, SHA-1, SHA-224/256/384/512; DES,
   AES-128/192/256. Answers count only if they authenticate at the
   request's level, for the right engine, inside the time window; forged,
@@ -53,7 +56,7 @@ Rust crates, from their documentation (November 2026). ✓ = supported,
 | Many agents over one socket | ✓ | ✓ | — | — | — |
 | Timeouts and retries built in | ✓ | ✓ | timeout (blocking API) | ✓ | timeout |
 | Walk / bulk walk helper | ✓ | ✓ | — | ✓ | — |
-| Traps and informs | *planned* | send and receive | parse received | send | — |
+| Traps and informs | send and receive | send and receive | parse received | send | — |
 | Agent | *planned* | ✓ | — | — | — |
 | MIB names | *planned* | ✓ (mib-rs) | ✓ (needs libnetsnmp) | — | — |
 | TCP transport | — | ✓ | — | — | — |
@@ -141,6 +144,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Notifications: `client.trap(oid, varbinds)`, `client.inform(…)` (waits
+for the acknowledgement) and `client.trap_v1(…)` send them; a
+`NotificationReceiver` takes traps and informs in every version,
+acknowledges informs, and hands them over in SNMPv2 form:
+
+```rust,no_run
+use snmpify::engine::LocalEngine;
+use snmpify::notification::NotificationReceiver;
+use snmpify::usm::{AuthProtocol, UsmUser};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let user = UsmUser::new("traps").with_auth(AuthProtocol::Sha256, "auth-password")?;
+    let mut rx = NotificationReceiver::bind("0.0.0.0:162")
+        .await?
+        .with_community("public")
+        .with_engine(LocalEngine::new(LocalEngine::generate_id()).with_user(user));
+    loop {
+        let n = rx.recv().await?;
+        println!("{} {} from {}", n.kind, n.trap_oid, n.source);
+    }
+}
+```
+
 Polling many agents: `Manager::bind("0.0.0.0:0")` gives clients
 (`manager.client(addr, community)`) that share one UDP socket and receive
 task; responses are matched by request id, source address and community,
@@ -168,13 +195,17 @@ microsecond.
 ```sh
 cargo test                                   # unit, robustness and doc tests
 
-# Interoperability with net-snmp's snmpd
+# Interoperability with net-snmp's snmpd and snmptrapd
 docker build -t snmpify-snmpd tools/snmpd
 docker run -d --rm --name snmpify-snmpd -p 127.0.0.1:1161:161/udp snmpify-snmpd
-SNMPIFY_AGENT=127.0.0.1:1161 cargo test --test netsnmp
+docker run -d --rm --name snmpify-snmptrapd -p 127.0.0.1:1162:162/udp \
+  --entrypoint /usr/sbin/snmptrapd snmpify-snmpd -f -Lo -C -c /etc/snmp/snmptrapd.conf
+SNMPIFY_AGENT=127.0.0.1:1161 SNMPIFY_TRAPD=127.0.0.1:1162 \
+  cargo test --test netsnmp --test netsnmp_notifications
 
 # Coverage (cargo install cargo-llvm-cov), with the snmpd tests
-SNMPIFY_AGENT=127.0.0.1:1161 cargo llvm-cov --all-targets --summary-only
+SNMPIFY_AGENT=127.0.0.1:1161 SNMPIFY_TRAPD=127.0.0.1:1162 \
+  cargo llvm-cov --all-targets --summary-only
 
 cargo +nightly fuzz run decode_message       # fuzzing (cargo install cargo-fuzz)
 ```
