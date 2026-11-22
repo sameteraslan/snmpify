@@ -13,7 +13,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY snmpd.conf /etc/snmp/snmpd.conf
 COPY snmptrapd.conf /etc/snmp/snmptrapd.conf
-EXPOSE 161/udp 705/tcp
+EXPOSE 161/udp 161/tcp 705/tcp
 # -f: foreground, -Lo: log to stdout, -C: only our config file
 # No MIB files are installed (Debian ships them separately); everything is numeric.
 ENV MIBS=""

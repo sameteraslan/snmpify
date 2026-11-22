@@ -346,8 +346,17 @@ struct Waiter {
     tx: oneshot::Sender<Reply>,
 }
 
+/// UDP, or one TCP connection to one agent (RFC 3430).
+enum Socket {
+    Udp(UdpSocket),
+    Tcp {
+        write: tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>,
+        local: SocketAddr,
+    },
+}
+
 struct Shared {
-    socket: UdpSocket,
+    socket: Socket,
     pending: Mutex<HashMap<i32, Waiter>>,
     next_id: AtomicU32,
     /// Privacy salts: must not repeat for a key, so a counter.
@@ -361,6 +370,27 @@ struct Shared {
 }
 
 impl Shared {
+    async fn send(&self, bytes: &[u8], target: SocketAddr) -> io::Result<()> {
+        match &self.socket {
+            Socket::Udp(s) => s.send_to(bytes, target).await.map(|_| ()),
+            Socket::Tcp { write, .. } => {
+                use tokio::io::AsyncWriteExt;
+                write.lock().await.write_all(bytes).await
+            }
+        }
+    }
+
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        match &self.socket {
+            Socket::Udp(s) => s.local_addr(),
+            Socket::Tcp { local, .. } => Ok(*local),
+        }
+    }
+
+    fn is_tcp(&self) -> bool {
+        matches!(self.socket, Socket::Tcp { .. })
+    }
+
     fn take(&self, id: i32) -> Option<Waiter> {
         self.pending
             .lock()
@@ -383,6 +413,27 @@ impl Drop for Transport {
 impl Transport {
     async fn bind(local: SocketAddr, check_source: bool) -> io::Result<Arc<Transport>> {
         let socket = UdpSocket::bind(local).await?;
+        Ok(Self::start(Socket::Udp(socket), check_source, None))
+    }
+
+    /// A TCP connection to `target`.
+    async fn connect_tcp(target: SocketAddr) -> io::Result<Arc<Transport>> {
+        let stream = tokio::net::TcpStream::connect(target).await?;
+        stream.set_nodelay(true)?;
+        let local = stream.local_addr()?;
+        let (read, write) = stream.into_split();
+        let socket = Socket::Tcp {
+            write: tokio::sync::Mutex::new(write),
+            local,
+        };
+        Ok(Self::start(socket, false, Some((read, target))))
+    }
+
+    fn start(
+        socket: Socket,
+        check_source: bool,
+        tcp: Option<(tokio::net::tcp::OwnedReadHalf, SocketAddr)>,
+    ) -> Arc<Transport> {
         // Start request ids somewhere unpredictable, like net-snmp, so that a
         // restarted manager does not accept late answers to its predecessor.
         let seed = std::time::SystemTime::now()
@@ -399,8 +450,11 @@ impl Transport {
             start: Instant::now(),
             in_flight: Mutex::new(Arc::new(tokio::sync::Semaphore::new(DEFAULT_MAX_IN_FLIGHT))),
         });
-        let task = tokio::spawn(receive(shared.clone()));
-        Ok(Arc::new(Transport { shared, task }))
+        let task = match tcp {
+            None => tokio::spawn(receive(shared.clone())),
+            Some((read, peer)) => tokio::spawn(receive_tcp(shared.clone(), read, peer)),
+        };
+        Arc::new(Transport { shared, task })
     }
 
     fn next_id(&self) -> i32 {
@@ -413,32 +467,58 @@ impl Transport {
 }
 
 async fn receive(shared: Arc<Shared>) {
+    let Socket::Udp(socket) = &shared.socket else {
+        return;
+    };
     let mut buf = vec![0u8; 65_535];
     loop {
-        let (n, from) = match shared.socket.recv_from(&mut buf).await {
+        let (n, from) = match socket.recv_from(&mut buf).await {
             Ok(x) => x,
             // ICMP port unreachable etc. are reported on later receives;
             // the request times out (and is retried) instead.
             Err(_) => continue,
         };
-        let bytes = &buf[..n];
+        dispatch(&shared, &buf[..n], from);
+    }
+}
+
+/// Reads messages from a TCP connection until it ends; then fails the
+/// requests still waiting (their channels close).
+async fn receive_tcp(
+    shared: Arc<Shared>,
+    mut read: tokio::net::tcp::OwnedReadHalf,
+    peer: SocketAddr,
+) {
+    while let Ok(Some(msg)) = crate::tcp::read_message(&mut read).await {
+        dispatch(&shared, &msg, peer);
+    }
+    shared
+        .pending
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+}
+
+/// Hands an answer to the request it belongs to, if it passes the checks.
+fn dispatch(shared: &Shared, bytes: &[u8], from: SocketAddr) {
+    {
         // Not SNMP or malformed: ignore, the request may retry.
         let Ok(version) = peek_version(bytes) else {
-            continue;
+            return;
         };
         let (id, community) = if version == Version::V3 {
             let Some(id) = peek_msg_id(bytes) else {
-                continue;
+                return;
             };
             (id, None)
         } else {
             let Ok(msg) = CommunityMessage::decode(bytes) else {
-                continue;
+                return;
             };
-            let AnyPdu::Pdu(pdu) = msg.pdu else { continue };
+            let AnyPdu::Pdu(pdu) = msg.pdu else { return };
             (pdu.request_id, Some((msg.version, msg.community, pdu)))
         };
-        let Some(w) = shared.take(id) else { continue };
+        let Some(w) = shared.take(id) else { return };
         let reply = if shared.check_source && w.from != from {
             None
         } else {
@@ -577,7 +657,7 @@ impl Manager {
 
     /// The local address of the socket.
     pub fn local_addr(&self) -> Result<SocketAddr> {
-        Ok(self.transport.shared.socket.local_addr()?)
+        Ok(self.transport.shared.local_addr()?)
     }
 
     /// At most `n` requests in flight on the socket at once (default
@@ -735,6 +815,23 @@ impl Client {
         })
     }
 
+    /// A client over TCP (RFC 3430), with a connection of its own:
+    /// messages are not retransmitted (the request waits as long as all
+    /// attempts would); a closed connection fails pending requests with
+    /// [`Error::Io`].
+    pub async fn connect_tcp(target: &str, credentials: impl Into<Credentials>) -> Result<Client> {
+        let target = lookup_host(target)
+            .await?
+            .next()
+            .ok_or(Error::InvalidArgument("target does not resolve"))?;
+        Ok(Client {
+            transport: Transport::connect_tcp(target).await?,
+            target,
+            security: Security::new(credentials.into()),
+            options: Options::default(),
+        })
+    }
+
     /// The same client with other options.
     pub fn with_options(mut self, options: Options) -> Self {
         self.options = options;
@@ -811,10 +908,23 @@ impl Client {
                 },
             );
         let _guard = PendingGuard { shared, id };
-        for _ in 0..=self.options.retries {
-            shared.socket.send_to(bytes, self.target).await?;
-            match tokio::time::timeout(self.options.timeout, &mut rx).await {
+        // TCP delivers or fails: no retransmission (RFC 3430 §2.1); the
+        // request gets the time all attempts would have had.
+        let (attempts, timeout) = if shared.is_tcp() {
+            (1, self.options.timeout * (self.options.retries + 1))
+        } else {
+            (self.options.retries + 1, self.options.timeout)
+        };
+        for _ in 0..attempts {
+            shared.send(bytes, self.target).await?;
+            match tokio::time::timeout(timeout, &mut rx).await {
                 Ok(Ok(reply)) => return Ok(reply),
+                Ok(Err(_)) if shared.is_tcp() => {
+                    return Err(Error::Io(io::Error::new(
+                        io::ErrorKind::ConnectionAborted,
+                        "the agent closed the connection",
+                    )))
+                }
                 Ok(Err(_)) => return Err(Error::Timeout), // receive task gone
                 Err(_) => continue,
             }
@@ -1051,11 +1161,7 @@ impl Client {
                 .originate(s.usm.user.name(), id, &s.usm.context_name, pdu)
                 .map_err(Error::Usm)?,
         };
-        self.transport
-            .shared
-            .socket
-            .send_to(&bytes, self.target)
-            .await?;
+        self.transport.shared.send(&bytes, self.target).await?;
         Ok(())
     }
 
@@ -1070,11 +1176,7 @@ impl Client {
             }
         };
         let bytes = CommunityMessage::new(Version::V1, &c.community, trap).encode();
-        self.transport
-            .shared
-            .socket
-            .send_to(&bytes, self.target)
-            .await?;
+        self.transport.shared.send(&bytes, self.target).await?;
         Ok(())
     }
 

@@ -409,13 +409,22 @@ fn connect(
     timeout: f64,
     retries: u32,
     max_repetitions: u32,
+    tcp: bool,
 ) -> PyResult<client::Client> {
     let creds = credentials(py, community, version, user, context)?;
     let options = options(py, timeout, retries, max_repetitions)?;
     let target = with_port(target);
-    py.detach(|| rt().block_on(client::Client::connect(&target, creds)))
-        .map(|c| c.with_options(options))
-        .map_err(|e| err_with(py, e))
+    py.detach(|| {
+        rt().block_on(async {
+            if tcp {
+                client::Client::connect_tcp(&target, creds).await
+            } else {
+                client::Client::connect(&target, creds).await
+            }
+        })
+    })
+    .map(|c| c.with_options(options))
+    .map_err(|e| err_with(py, e))
 }
 
 /// Many agents over one UDP socket: clients made by a manager share its
@@ -547,7 +556,7 @@ struct Client {
 #[pymethods]
 impl Client {
     #[new]
-    #[pyo3(signature = (target, community="public", version="2c", *, user=None, context=None, timeout=1.0, retries=2, max_repetitions=25))]
+    #[pyo3(signature = (target, community="public", version="2c", *, user=None, context=None, timeout=1.0, retries=2, max_repetitions=25, tcp=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -559,6 +568,7 @@ impl Client {
         timeout: f64,
         retries: u32,
         max_repetitions: u32,
+        tcp: bool,
     ) -> PyResult<Self> {
         let inner = connect(
             py,
@@ -570,6 +580,7 @@ impl Client {
             timeout,
             retries,
             max_repetitions,
+            tcp,
         )?;
         Ok(Client { inner })
     }
@@ -732,7 +743,7 @@ struct AsyncClient {
 #[pymethods]
 impl AsyncClient {
     #[new]
-    #[pyo3(signature = (target, community="public", version="2c", *, user=None, context=None, timeout=1.0, retries=2, max_repetitions=25))]
+    #[pyo3(signature = (target, community="public", version="2c", *, user=None, context=None, timeout=1.0, retries=2, max_repetitions=25, tcp=false))]
     #[allow(clippy::too_many_arguments)]
     fn new(
         py: Python<'_>,
@@ -744,6 +755,7 @@ impl AsyncClient {
         timeout: f64,
         retries: u32,
         max_repetitions: u32,
+        tcp: bool,
     ) -> PyResult<Self> {
         let inner = connect(
             py,
@@ -755,6 +767,7 @@ impl AsyncClient {
             timeout,
             retries,
             max_repetitions,
+            tcp,
         )?;
         Ok(AsyncClient { inner })
     }

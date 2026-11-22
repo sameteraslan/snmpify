@@ -408,3 +408,83 @@ fn mib_tree_basics() {
     assert_eq!(h.get(&oid("1.3")), Value::Integer(1));
     assert!(h.get_next(&oid("1.3")).is_none());
 }
+
+#[tokio::test]
+async fn over_tcp() {
+    let mib = MibTree::new().with_system("tcp agent", oid(ENT), "tcp-1", || 1);
+    for i in 1..=300u32 {
+        mib.insert(oid(&format!("{ENT}.1.{i}")), Value::from("x".repeat(100)));
+    }
+    let engine = LocalEngine::new(LocalEngine::generate_id()).with_user(alice());
+    let agent = Arc::new(
+        Agent::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_community("public", Access::ReadOnly)
+            .with_engine(engine)
+            .register(oid("1.3.6.1.2.1.1"), mib.clone())
+            .register(oid(ENT), mib),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    tokio::spawn(agent.clone().run_tcp(listener));
+    for c in [
+        Client::connect_tcp(&addr, Community::v2c("public"))
+            .await
+            .unwrap(),
+        Client::connect_tcp(&addr, alice()).await.unwrap(),
+    ] {
+        assert_eq!(
+            c.get_one("1.3.6.1.2.1.1.5.0").await.unwrap(),
+            Value::from("tcp-1")
+        );
+        // Messages of many kilobytes, back to back on the stream.
+        let rows = c.walk_all(format!("{ENT}.1").as_str()).await.unwrap();
+        assert_eq!(rows.len(), 300);
+        // Concurrent requests share the connection.
+        let row = format!("{ENT}.1.7");
+        let (a, b) = tokio::join!(c.get_one("1.3.6.1.2.1.1.5.0"), c.get_one(row.as_str()));
+        assert!(a.is_ok() && b.is_ok());
+    }
+    // A wrong community gets no answer: the whole budget, then a timeout.
+    let c = Client::connect_tcp(&addr, Community::v2c("nope"))
+        .await
+        .unwrap()
+        .with_options(Options {
+            timeout: Duration::from_millis(100),
+            retries: 1,
+            max_repetitions: 10,
+        });
+    let t = std::time::Instant::now();
+    assert!(matches!(
+        c.get_one("1.3.6.1.2.1.1.5.0").await,
+        Err(Error::Timeout)
+    ));
+    assert!(t.elapsed() >= Duration::from_millis(200));
+    // Nothing listening, and a connection the agent closes.
+    let free = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let dead = free.local_addr().unwrap().to_string();
+    drop(free);
+    assert!(matches!(
+        Client::connect_tcp(&dead, Community::v2c("public")).await,
+        Err(Error::Io(_))
+    ));
+    let closer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let caddr = closer.local_addr().unwrap().to_string();
+    tokio::spawn(async move {
+        let (s, _) = closer.accept().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(s);
+    });
+    let c = Client::connect_tcp(&caddr, Community::v2c("public"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        c.get_one("1.3.6.1.2.1.1.5.0").await,
+        Err(Error::Io(_))
+    ));
+    assert!(matches!(
+        c.get_one("1.3.6.1.2.1.1.5.0").await,
+        Err(Error::Io(_))
+    ));
+}

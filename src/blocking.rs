@@ -57,6 +57,14 @@ impl Client {
         })
     }
 
+    /// A client over TCP (RFC 3430), see [`client::Client::connect_tcp`].
+    pub fn connect_tcp(target: &str, credentials: impl Into<Credentials>) -> Result<Client> {
+        let c = credentials.into();
+        Ok(Client {
+            inner: runtime().block_on(client::Client::connect_tcp(target, c))?,
+        })
+    }
+
     /// Wraps an async client (its socket must belong to [`runtime`]).
     pub fn from_async(inner: client::Client) -> Client {
         Client { inner }

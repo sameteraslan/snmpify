@@ -279,6 +279,8 @@ def test_netsnmp():
     user = snmpify.UsmUser("sha512_aes256", auth=("SHA-512", "auth-sha512_aes256"),
                            privacy=("AES-256", "priv-sha512_aes256"))
     assert snmpify.Client(target, user=user).get("1.3.6.1.2.1.1.5.0") == b"snmpify-agent"
+    tcp = snmpify.Client(target, tcp=True)
+    assert tcp.get("1.3.6.1.2.1.1.5.0") == b"snmpify-agent"
     mib = snmpify.Mib()
     lines = [mib.format(o, v) for o, v in c.walk("1.3.6.1.2.1.2.2.1.8")]
     assert lines[0].startswith("IF-MIB::ifOperStatus.1 = up(1)")

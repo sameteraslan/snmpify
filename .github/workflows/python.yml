@@ -51,7 +51,7 @@ jobs:
       - name: Start snmpd
         run: |
           docker build -t snmpify-snmpd tools/snmpd
-          docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp snmpify-snmpd
+          docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp -p 127.0.0.1:1161:161/tcp snmpify-snmpd
           sleep 2
       - name: Build and test
         working-directory: python

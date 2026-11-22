@@ -38,6 +38,7 @@ class Client:
         timeout: float = 1.0,
         retries: int = 2,
         max_repetitions: int = 25,
+        tcp: bool = False,
     ) -> None: ...
     @property
     def version(self) -> str: ...
@@ -66,6 +67,7 @@ class AsyncClient:
         timeout: float = 1.0,
         retries: int = 2,
         max_repetitions: int = 25,
+        tcp: bool = False,
     ) -> None: ...
     @property
     def version(self) -> str: ...
