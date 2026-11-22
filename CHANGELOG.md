@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-22
 
 ### Performance
 - The client reads its socket from the waiting request (no receive task;
