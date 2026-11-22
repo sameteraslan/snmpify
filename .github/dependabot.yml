@@ -21,3 +21,10 @@ updates:
     directory: /tools/snmpd
     schedule:
       interval: weekly
+  - package-ecosystem: pip
+    directory: /python
+    schedule:
+      interval: weekly
+    groups:
+      pip:
+        patterns: ["*"]

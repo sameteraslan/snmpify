@@ -38,6 +38,8 @@ pub mod agent;
 pub mod agentx;
 pub mod ber;
 #[cfg(feature = "client")]
+pub mod blocking;
+#[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "v3")]
 pub mod engine;

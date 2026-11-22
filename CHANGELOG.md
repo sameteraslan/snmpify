@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Added
+- Python bindings (`python/`, PyPI `snmpify`, PyO3, abi3 wheels for
+  Python 3.9+ on Linux, macOS and Windows): `Client` (blocking, GIL
+  released) and `AsyncClient` (asyncio) with get / get_many / get_next /
+  get_bulk / set / walk / trap / inform, v1, v2c and v3 (`UsmUser`);
+  values typed (`Counter32`, `Gauge32`, `TimeTicks`, `Counter64`,
+  `IpAddress`, `ObjectId`, `Opaque` keep their SNMP type through
+  Python); exceptions (`SnmpTimeout`, `AgentError`, `ReportError`,
+  `InvalidArgument`); `NotificationReceiver` (blocking, async
+  iteration); `Agent` with fixed, writable and callback values; `Mib`.
+  Type stubs. Tested against an in-process agent and net-snmp's snmpd in
+  CI; wheels are built and published on `py-v*` tags.
+- `snmpify::blocking`: `Client` (with `Walk` as an iterator),
+  `NotificationReceiver`, `RunningAgent`, on a shared runtime.
 - MIBs (`snmpify::mib`): a tolerant SMIv1/SMIv2 parser (OBJECT-TYPE,
   OBJECT-IDENTITY, MODULE-IDENTITY, NOTIFICATION-TYPE, TRAP-TYPE, groups,
   compliances, textual conventions, imports, modules in any order);
