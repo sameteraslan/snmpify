@@ -1,7 +1,8 @@
 # net-snmp's snmpd as the reference agent for integration tests and
 # benchmarks. Usage:
 #   docker build -t snmpify-snmpd tools/snmpd
-#   docker run -d --rm --name snmpify-snmpd -p 127.0.0.1:1161:161/udp snmpify-snmpd
+#   docker run -d --rm --name snmpify-snmpd -p 127.0.0.1:1161:161/udp \
+#     -p 127.0.0.1:1705:705/tcp snmpify-snmpd
 #   SNMPIFY_AGENT=127.0.0.1:1161 cargo test --test netsnmp
 # The same image runs snmptrapd for the notification tests:
 #   docker run -d --rm --name snmpify-snmptrapd -p 127.0.0.1:1162:162/udp \
@@ -12,7 +13,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY snmpd.conf /etc/snmp/snmpd.conf
 COPY snmptrapd.conf /etc/snmp/snmptrapd.conf
-EXPOSE 161/udp
+EXPOSE 161/udp 705/tcp
 # -f: foreground, -Lo: log to stdout, -C: only our config file
 # No MIB files are installed (Debian ships them separately); everything is numeric.
 ENV MIBS=""

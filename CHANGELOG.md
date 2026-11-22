@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Added
+- Agent (`snmpify::agent`): `Agent` answers Get, GetNext, GetBulk and Set
+  over SNMPv1, v2c and v3 from `MibHandler`s registered under subtrees
+  (deepest registration wins); `MibTree` holds fixed, writable and
+  computed values and the MIB-II system group. Two-phase sets, v1 error
+  mapping and Counter64 skipping (RFC 3584), tooBig and GetBulk
+  truncation by message size, read-only / read-write communities, per
+  user access and minimum level (authorizationError below it), unknown
+  contexts reported.
+- AgentX subagent (`snmpify::agentx`, RFC 2741): the same handlers under
+  a master agent (TCP or Unix socket): Open, Register, Get, GetNext,
+  GetBulk, TestSet/CommitSet/UndoSet/CleanupSet, Notify, both byte
+  orders.
+- Tests: the client against the agent in every version; net-snmp's
+  snmpget/snmpbulkwalk/snmpset against the agent (v2c and v3 authPriv);
+  snmpify as an AgentX subagent of snmpd (get, walk, set, notify).
 - Notifications (`snmpify::notification`): `NotificationReceiver` takes
   traps (v1, v2c, v3) and informs (v2c, v3, acknowledged), filtered by
   community and SNMPv3 user, and hands them over in SNMPv2 form

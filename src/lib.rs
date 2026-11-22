@@ -6,8 +6,8 @@
 //! SNMPv3 security ([`usm`]: every standard authentication and privacy
 //! protocol), an async client ([`client`]) with walks and mass polling
 //! over one socket, and notifications ([`notification`]: traps and
-//! informs, sent and received). The agent, MIBs and the Python and C/C++
-//! bindings are on the
+//! informs, sent and received) and the agent side ([`agent`],
+//! [`agentx`]). MIBs and the Python and C/C++ bindings are on the
 //! [roadmap](https://github.com/snmp-rs/snmpify/blob/main/ROADMAP.md).
 //!
 //! Features: `client` (default: tokio, implies `v3`), `v3` (USM crypto).
@@ -32,6 +32,10 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+#[cfg(feature = "client")]
+pub mod agent;
+#[cfg(feature = "client")]
+pub mod agentx;
 pub mod ber;
 #[cfg(feature = "client")]
 pub mod client;
