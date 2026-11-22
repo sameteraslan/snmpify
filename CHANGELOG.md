@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-11-22
 
 First code: the SNMP wire format and an async v1/v2c/v3 client.
 
