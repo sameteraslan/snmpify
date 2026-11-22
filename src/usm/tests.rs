@@ -101,12 +101,12 @@ fn des_cbc_known_vector() {
     let mut key = hex("0123456789abcdef");
     key.extend(hex("1234567890abcdef")); // pre-IV; salt 0 → IV = pre-IV
     let mut data = b"Now is the time for all ".to_vec();
-    des_cbc(&key, &[0; 8], &mut data, false);
+    des_cbc(PrivProtocol::Des, &key, &[0; 8], &mut data, false);
     assert_eq!(
         data,
         hex("e5c7cdde872bf27c43e934008c389c0f683788499a7c05f6")
     );
-    des_cbc(&key, &[0; 8], &mut data, true);
+    des_cbc(PrivProtocol::Des, &key, &[0; 8], &mut data, true);
     assert_eq!(data, b"Now is the time for all ");
 }
 
@@ -460,4 +460,36 @@ fn aes_key_extensions_match_pysnmp() {
         assert_eq!(std.open(&b).unwrap_err(), UsmError::DecryptionError);
         assert!(p.to_string().ends_with("-C"));
     }
+}
+
+#[test]
+fn des3_matches_pysnmp() {
+    // pysnmp 7.1 (eso/priv/des3.py) localized keys for "maplesyrup",
+    // engine 00…02: the Reeder extension to 32 octets (3DES key ‖ pre-IV).
+    let e = hex(RFC_ENGINE);
+    for (a, want) in [
+        (
+            AuthProtocol::Md5,
+            "526f5eed9fcce26f8964c2930787d82b79eff44a90650ee0a3a40abfac5acc12",
+        ),
+        (
+            AuthProtocol::Sha1,
+            "6695febc9288e36282235fc7151f128497b38f3f9b8b6d78936ba6e7d19dfd9c",
+        ),
+    ] {
+        let ku = a.password_to_key(b"maplesyrup").unwrap();
+        assert_eq!(PrivProtocol::Des3.localize(a, &ku, &e), hex(want), "{a}");
+    }
+    let engine = hex("80001f8880 0102030405");
+    let u = UsmUser::new("d3")
+        .with_auth(AuthProtocol::Sha256, "auth-pass")
+        .unwrap()
+        .with_privacy(PrivProtocol::Des3, "priv-pass")
+        .unwrap();
+    let k = u.localize(&engine);
+    let b = k.seal(request(&engine), 3).unwrap();
+    assert_eq!(k.open(&b).unwrap().data, request(&engine).data);
+    assert!(!b.windows(10).any(|w| w == b"an odd-len"));
+    assert_eq!(PrivProtocol::Des3.to_string(), "3DES");
+    assert_eq!(PrivProtocol::Des3.key_len(), 32);
 }

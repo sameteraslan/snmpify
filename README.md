@@ -57,7 +57,7 @@ Rust crates, from their documentation (November 2026). ✓ = supported,
 |---|---|---|---|---|---|
 | SNMPv1 / v2c | ✓ | ✓ | ✓ | v2c | v2c |
 | SNMPv3 auth: MD5, SHA-1, SHA-224 … SHA-512 | ✓ | ✓ | ✓ | — | — |
-| SNMPv3 privacy: DES, AES-128/192/256 | ✓ | ✓ (and 3DES) | ✓ | — | — |
+| SNMPv3 privacy: DES, AES-128/192/256 | ✓ (and 3DES) | ✓ (and 3DES) | ✓ | — | — |
 | Async (tokio) | ✓ | ✓ | ✓ | ✓ | — |
 | Blocking API | ✓ | example wrapper | ✓ | — | ✓ |
 | Many agents over one socket | ✓ | ✓ | — | — | — |
@@ -114,23 +114,28 @@ on one machine over loopback, medians of 5 runs
 
 | | snmpify | snmp2 | async-snmp | csnmp | net-snmp (C) |
 |---|---:|---:|---:|---:|---:|
-| Walk, 200 000 objects (v2c): time | **134 ms** | 135 ms | 173 ms | 475 ms | 163 ms |
-| … CPU | **43 ms** | **43 ms** | 78 ms | 370 ms | 60 ms |
-| Walk over SNMPv3 (SHA + AES): CPU | **64 ms** | 72 ms | 116 ms | n/a | 100 ms |
-| 5000 GetRequests: CPU | 26 ms | 25 ms | 40 ms | 48 ms | **20 ms** |
-| 1000 agents polled at once: time | **8 ms** | 86 ms | 4020 ms | 27 ms | 12 ms |
-| … peak memory | **5.5 MB** | 134 MB | 10 MB | 18 MB | 11 MB |
+| Walk, 200 000 objects (v2c): time | **140 ms** | 141 ms | 185 ms | 457 ms | 158 ms |
+| … CPU | **42 ms** | 48 ms | 85 ms | 348 ms | 50 ms |
+| Walk over SNMPv3 (SHA + AES): CPU | 74 ms | **72 ms** | 117 ms | n/a | 110 ms |
+| 5000 GetRequests: CPU | 27 ms | 23 ms | 35 ms | 41 ms | **20 ms** |
+| 2000 informs, acknowledged: time | 24 ms | n/a | 30 ms | 41 ms | **21 ms** |
+| 1000 agents polled at once: time | **9 ms** | 85 ms | 4023 ms | 24 ms | 12 ms |
+| … peak memory | **5.5 MB** | 135 MB | 10 MB | 18 MB | 11 MB |
 
 | Python | snmpify | ezsnmp | pysnmp |
 |---|---:|---:|---:|
-| Walk, 200 000 objects | **248 ms** | 2421 ms | 19 548 ms |
-| GetRequest latency (p50) | **11 µs** | 16 µs | 422 µs |
-| 1000 agents polled at once | **31 ms** | 163 ms | 4255 ms (663 answered) |
+| Walk, 200 000 objects | **275 ms** | 2444 ms | 19 794 ms |
+| GetRequest latency (p50) | **10 µs** | 24 µs | 431 µs |
+| 1000 agents polled at once | **29 ms** | 176 ms | 4275 ms (663 answered) |
 
-snmpify walks as fast as the leanest Rust client (snmp2, which has no
-timeouts or request matching of its own), leads mass polling and SNMPv3,
-and is the fastest from Python. Walks read the answers in place
-(`Client::walk_with`); owned values (`walk_all`) cost about 10% more.
+snmpify's walks are level with the leanest Rust client, snmp2, which has
+no timeouts or request matching of its own. It is far ahead when polling
+many agents at once, and it is the fastest library from Python. Walks
+read the answers in place (`Client::walk_with`); owned values
+(`walk_all`) cost 10–30% more CPU. For short single requests, net-snmp's
+C library uses the least CPU. [COMPARISON.md](COMPARISON.md) has every
+function (GetNext, GetBulk, Set, traps, informs, the agent, SNMPv3
+protocols, transports) for all seven libraries.
 
 ## Example
 

@@ -442,6 +442,7 @@ pub unsafe extern "C" fn snmpify_user_new(
                 "AES256" => PrivProtocol::Aes256,
                 "AES192C" => PrivProtocol::Aes192Cisco,
                 "AES256C" => PrivProtocol::Aes256Cisco,
+                "3DES" | "DES3" | "3DESEDE" | "TDES" => PrivProtocol::Des3,
                 _ => return Err(invalid(format!("unknown privacy protocol {p:?}"))),
             };
             u = u

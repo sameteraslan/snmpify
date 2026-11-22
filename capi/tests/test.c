@@ -40,6 +40,9 @@ int main(void) {
     CHECK(alice != NULL);
     CHECK(snmpify_user_new("x", "SHA-999", "password", NULL, NULL) == NULL);
     CHECK(strstr(snmpify_last_error(), "SHA-999") != NULL);
+    snmpify_user *des3 = snmpify_user_new("d", "SHA", "password", "3DES", "password");
+    CHECK(des3 != NULL);
+    snmpify_user_free(des3);
 
     /* An agent. */
     snmpify_agent *a = snmpify_agent_new("127.0.0.1:0");

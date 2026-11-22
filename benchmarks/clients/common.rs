@@ -4,6 +4,9 @@
 pub const SYS_NAME: &str = "1.3.6.1.2.1.1.5.0";
 pub const TABLE: &str = "1.3.6.1.4.1.99999.1";
 pub const MAX_REP: u32 = 25;
+pub const WRITABLE: &str = "1.3.6.1.4.1.99999.3.0";
+pub const BULK_REP: u32 = 50;
+pub const LINK_DOWN: &str = "1.3.6.1.6.3.1.1.5.3";
 
 pub struct Args {
     pub scenario: String,

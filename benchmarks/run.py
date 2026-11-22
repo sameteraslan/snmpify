@@ -36,6 +36,11 @@ SCENARIOS = {
     "walk": (20, "20 walks of a 10 000-object table, SNMPv2c GetBulk (max-repetitions 25)"),
     "walk3": (20, "the same over SNMPv3 authPriv (SHA, AES-128)"),
     "get": (5000, "5000 sequential GetRequests for one object"),
+    "getnext": (2000, "2000 sequential GetNextRequests"),
+    "bulk": (2000, "2000 sequential GetBulkRequests, 50 rows each (100 000 objects)"),
+    "set": (2000, "2000 sequential SetRequests (an OCTET STRING)"),
+    "trap": (2000, "2000 SNMPv2c traps sent (no answer; the time to hand each to the socket)"),
+    "inform": (2000, "2000 SNMPv2c informs, each waiting for its acknowledgement"),
     "poll": (N_POLL, f"{N_POLL} agents, one GetRequest each, all at once"),
     "idle": (0, "start, load the library, exit"),
 }
@@ -108,12 +113,15 @@ def main():
                 for name, cmd in clients().items():
                     if a.only and name not in a.only:
                         continue
+                    # Only walks differ: everything else is owned anyway.
+                    if name.endswith("(owned values)") and scenario not in ("walk", "walk3"):
+                        continue
                     rec = run_one(cmd, scenario, n)
                     results.setdefault(scenario, {}).setdefault(name, []).append(rec)
                     if "failed" in rec:
                         print(f"run {run} {scenario} {name}: FAILED {rec['failed']}", file=sys.stderr)
                     elif not rec.get("unsupported"):
-                        print(f"run {run} {scenario:5} {name:18} {rec['ms']:9.1f} ms  items {rec['items']:6}  "
+                        print(f"run {run} {scenario:7} {name:18} {rec['ms']:9.1f} ms  items {rec['items']:6}  "
                               f"cpu {rec['cpu_ms']:7.0f} ms  rss {rec['rss_mb']:6.1f} MB", flush=True)
                     time.sleep(0.2)
     finally:
@@ -165,11 +173,12 @@ def summarize():
     heads = {
         "walk": ["Time", "Objects/s", "CPU", "CPU, work", "Peak RSS"],
         "walk3": ["Time", "Objects/s", "CPU", "CPU, work", "Peak RSS"],
-        "get": ["Time", "Latency p50", "Latency p99", "CPU, work", "Peak RSS"],
+        **{k: ["Time", "Latency p50", "Latency p99", "CPU, work", "Peak RSS"]
+           for k in ["get", "getnext", "bulk", "set", "trap", "inform"]},
         "poll": ["Time", "Answered", "CPU", "CPU, work", "Peak RSS"],
         "idle": ["CPU", "Peak RSS"],
     }
-    for scenario in ["walk", "walk3", "get", "poll", "idle"]:
+    for scenario in SCENARIOS:
         if scenario not in med:
             continue
         lines += [f"### {scenario}: {meta['scenarios'][scenario]}", "",
@@ -181,12 +190,14 @@ def summarize():
             if m == "failed":
                 lines.append(f"| {name} | " + " | ".join(["failed"] * len(heads[scenario])) + " |")
                 continue
-            base = idle.get(name) if isinstance(idle.get(name), dict) else None
+            # The owned-values client is the same program: same startup.
+            base = idle.get(name) or idle.get(name.replace(" (owned values)", ""))
+            base = base if isinstance(base, dict) else None
             work = f"{max(m['cpu_ms'] - base['cpu_ms'], 0):.0f} ms" if base else "?"
             if scenario in ("walk", "walk3"):
                 row = [f"{m['ms']:.0f} ms", f"{m['items'] / m['ms'] * 1e3:,.0f}", f"{m['cpu_ms']:.0f} ms", work,
                        f"{m['rss_mb']:.1f} MB"]
-            elif scenario == "get":
+            elif scenario in ("get", "getnext", "bulk", "set", "trap", "inform"):
                 row = [f"{m['ms']:.0f} ms", f"{m['p50_us']:.0f} µs", f"{m['p99_us']:.0f} µs", work,
                        f"{m['rss_mb']:.1f} MB"]
             elif scenario == "poll":

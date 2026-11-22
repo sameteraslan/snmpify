@@ -6,6 +6,20 @@ import time
 SYS_NAME = "1.3.6.1.2.1.1.5.0"
 TABLE = "1.3.6.1.4.1.99999.1"
 MAX_REP = 25
+WRITABLE = "1.3.6.1.4.1.99999.3.0"
+BULK_REP = 50
+LINK_DOWN = "1.3.6.1.6.3.1.1.5.3"
+IF_INDEX = "1.3.6.1.2.1.2.2.1.1.7"
+
+
+def timed(n, f):
+    """Runs f(i) n times; returns (sum of results, latencies in µs)."""
+    lat, items = [], 0
+    for i in range(n):
+        s = time.perf_counter()
+        items += f(i)
+        lat.append((time.perf_counter() - s) * 1e6)
+    return items, lat
 
 
 def args():

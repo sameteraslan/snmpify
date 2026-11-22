@@ -18,7 +18,9 @@ async fn main() {
     match a.scenario.as_str() {
         "walk" | "walk3" => {
             let c = if a.scenario == "walk" {
-                Client::connect(&target, Community::v2c("public")).await.unwrap()
+                Client::connect(&target, Community::v2c("public"))
+                    .await
+                    .unwrap()
             } else {
                 let u = UsmUser::new("bench")
                     .with_auth(AuthProtocol::Sha1, "bench-auth-pass")
@@ -46,7 +48,9 @@ async fn main() {
             report(n, t.elapsed().as_secs_f64() * 1e3, &mut []);
         }
         "get" => {
-            let c = Client::connect(&target, Community::v2c("public")).await.unwrap();
+            let c = Client::connect(&target, Community::v2c("public"))
+                .await
+                .unwrap();
             let o: snmpify::Oid = SYS_NAME.parse().unwrap();
             let mut lat = Vec::with_capacity(a.n);
             for _ in 0..a.n {
@@ -71,6 +75,53 @@ async fn main() {
                 ok += t.await.unwrap() as usize;
             }
             report(ok, t.elapsed().as_secs_f64() * 1e3, &mut []);
+        }
+        "getnext" | "bulk" | "set" => {
+            let community = if a.scenario == "set" {
+                "private"
+            } else {
+                "public"
+            };
+            let c = Client::connect(&target, Community::v2c(community))
+                .await
+                .unwrap();
+            let name: snmpify::Oid = SYS_NAME.parse().unwrap();
+            let table: snmpify::Oid = TABLE.parse().unwrap();
+            let w: snmpify::Oid = WRITABLE.parse().unwrap();
+            let mut lat = Vec::with_capacity(a.n);
+            let mut items = 0;
+            for i in 0..a.n {
+                let s = Instant::now();
+                items += match a.scenario.as_str() {
+                    "getnext" => c.get_next([&name]).await.unwrap().len(),
+                    "bulk" => c.get_bulk(0, BULK_REP, [&table]).await.unwrap().len(),
+                    _ => c
+                        .set(vec![snmpify::VarBind::new(w.clone(), format!("value {i}"))])
+                        .await
+                        .unwrap()
+                        .len(),
+                };
+                lat.push(s.elapsed().as_secs_f64() * 1e6);
+            }
+            report(items, t.elapsed().as_secs_f64() * 1e3, &mut lat);
+        }
+        "trap" | "inform" => {
+            let rx = format!("{}:{}", a.host, a.port - 1);
+            let c = Client::connect(&rx, Community::v2c("public"))
+                .await
+                .unwrap();
+            let vbs = vec![snmpify::VarBind::new([1, 3, 6, 1, 2, 1, 2, 2, 1, 1, 7], 7)];
+            let mut lat = Vec::with_capacity(a.n);
+            for _ in 0..a.n {
+                let s = Instant::now();
+                if a.scenario == "trap" {
+                    c.trap(LINK_DOWN, vbs.clone()).await.unwrap();
+                } else {
+                    c.inform(LINK_DOWN, vbs.clone()).await.unwrap();
+                }
+                lat.push(s.elapsed().as_secs_f64() * 1e6);
+            }
+            report(a.n, t.elapsed().as_secs_f64() * 1e3, &mut lat);
         }
         "idle" => report(0, 0.0, &mut []),
         _ => unsupported(),
