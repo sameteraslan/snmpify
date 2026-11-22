@@ -1237,11 +1237,15 @@ impl Client {
         }
         let mut deadline = Instant::now() + timeout;
         let mut retries_left = self.options.retries;
-        shared.send(bytes, self.target).await?;
         // The common case: nobody is reading the socket, so read it
-        // ourselves: no table entry, no channel, no hand-off.
+        // ourselves: no table entry, no channel, no hand-off. Decide before
+        // sending: an answer must never arrive before its request is either
+        // reading or in the table (the reader would drop it).
         let mut reader = match shared.try_take_receiver() {
-            Some(r) => r,
+            Some(r) => {
+                shared.send(bytes, self.target).await?;
+                r
+            }
             None => {
                 // Others read: wait in the table for our answer, or for our
                 // turn to read.
@@ -1259,6 +1263,7 @@ impl Client {
                     .insert(id, waiter(tx, deadline));
                 shared.register_deadline(deadline);
                 let _guard = PendingGuard { shared, id };
+                shared.send(bytes, self.target).await?;
                 loop {
                     tokio::select! {
                         biased;
