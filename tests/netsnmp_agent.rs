@@ -85,6 +85,13 @@ async fn netsnmp_tools_against_the_agent() {
         .register(oid("1.3.6.1.2.1.1"), mib.clone())
         .register(oid("1.3.6.1.4.1.99999"), mib.clone());
     let target = agent.local_addr().unwrap().to_string();
+    // The same agent over TCP.
+    let agent = std::sync::Arc::new(agent);
+    let tcp = tokio::net::TcpListener::bind(&format!("{host}:0"))
+        .await
+        .unwrap();
+    let tcp_target = format!("tcp:{}", tcp.local_addr().unwrap());
+    tokio::spawn(agent.clone().run_tcp(tcp));
     tokio::spawn(async move { agent.run().await });
     let v3 = [
         "-v3",
@@ -102,6 +109,7 @@ async fn netsnmp_tools_against_the_agent() {
         "agent-priv-pass",
     ];
     let t = target.clone();
+    let tt = tcp_target.clone();
     let results = tokio::task::spawn_blocking(move || {
         let mut r = Vec::new();
         for auth in [&["-v2c", "-c", "public"][..], &v3[..]] {
@@ -132,6 +140,20 @@ async fn netsnmp_tools_against_the_agent() {
             "s",
             "x",
         ]));
+        // net-snmp over TCP.
+        r.push(netsnmp(&[
+            "snmpget",
+            "-On",
+            "-v2c",
+            "-c",
+            "public",
+            &tt,
+            "1.3.6.1.2.1.1.5.0",
+        ]));
+        let mut w3 = vec!["snmpbulkwalk", "-On"];
+        w3.extend_from_slice(&v3);
+        w3.extend_from_slice(&[&tt, "1.3.6.1.4.1.99999.1"]);
+        r.push(netsnmp(&w3));
         r
     })
     .await
@@ -166,6 +188,21 @@ async fn netsnmp_tools_against_the_agent() {
         !results[7].0 && results[7].1.contains("noAccess"),
         "{}",
         results[7].1
+    );
+    assert!(
+        results[8].0 && results[8].1.contains("STRING: \"rust-agent\""),
+        "{}",
+        results[8].1
+    );
+    assert_eq!(
+        results[9]
+            .1
+            .lines()
+            .filter(|l| l.contains("Counter64"))
+            .count(),
+        50,
+        "{}",
+        results[9].1
     );
 }
 

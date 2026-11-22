@@ -176,7 +176,26 @@ int main(void) {
     CHECK(strcmp(snmpify_notification_sender(note), "alice") == 0);
     snmpify_notification_free(note);
 
-    /* net-snmp, when available. */
+    /* TCP (net-snmp's snmpd listens on TCP too). */
+    if (getenv("SNMPIFY_AGENT")) {
+        snmpify_client *tcp = snmpify_client_new_tcp(getenv("SNMPIFY_AGENT"), "public", 2);
+        CHECK(tcp != NULL);
+        CHECK(snmpify_get(tcp, oids, 1, &r) == SNMPIFY_OK);
+        CHECK(strcmp(snmpify_result_text(r, 0), "snmpify-agent") == 0);
+        snmpify_result_free(r);
+        snmpify_user *tu = snmpify_user_new("sha_aes", "SHA", "auth-sha_aes", "AES", "priv-sha_aes");
+        snmpify_client *tcp3 = snmpify_client_new_v3_tcp(getenv("SNMPIFY_AGENT"), tu, NULL);
+        CHECK(snmpify_walk_all(tcp3, "1.3.6.1.2.1.2.2", &r) == SNMPIFY_OK);
+        CHECK(snmpify_result_len(r) > 10);
+        snmpify_result_free(r);
+        snmpify_client_free(tcp3);
+        snmpify_user_free(tu);
+        snmpify_client_free(tcp);
+    }
+    CHECK(snmpify_client_new_tcp("127.0.0.1:1", "public", 2) == NULL);
+    CHECK(snmpify_client_new_tcp(addr, "public", 9) == NULL);
+
+        /* net-snmp, when available. */
     const char *netsnmp = getenv("SNMPIFY_AGENT");
     if (netsnmp) {
         snmpify_client *ns = snmpify_client_new(netsnmp, "public", 2);

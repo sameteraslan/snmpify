@@ -566,4 +566,33 @@ mod client {
             "IF-MIB::ifType.1 = softwareLoopback(24)"
         );
     }
+
+    #[tokio::test]
+    async fn over_tcp() {
+        // snmpd listens on TCP too (agentAddress udp:161,tcp:161).
+        let Some(addr) = std::env::var("SNMPIFY_AGENT").ok() else {
+            eprintln!("SNMPIFY_AGENT not set; skipped");
+            return;
+        };
+        let c = Client::connect_tcp(&addr, Community::v2c("public"))
+            .await
+            .unwrap();
+        assert_eq!(
+            c.get_one(SYS_NAME).await.unwrap(),
+            Value::from("snmpify-agent")
+        );
+        let all = c.walk_all("1.3.6.1").await.unwrap();
+        assert!(all.len() > 1000, "{}", all.len());
+        let v3 = Client::connect_tcp(
+            &addr,
+            user(AuthProtocol::Sha256, Some(PrivProtocol::Aes128)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v3.get_one(SYS_NAME).await.unwrap(),
+            Value::from("snmpify-agent")
+        );
+        assert!(!v3.walk_all(IF_TABLE).await.unwrap().is_empty());
+    }
 }

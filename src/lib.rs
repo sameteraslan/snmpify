@@ -49,6 +49,8 @@ pub mod mib;
 pub mod notification;
 mod oid;
 mod pdu;
+#[cfg(feature = "client")]
+mod tcp;
 #[cfg(feature = "v3")]
 pub mod usm;
 pub mod v3;

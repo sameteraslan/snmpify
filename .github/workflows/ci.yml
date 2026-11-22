@@ -58,7 +58,7 @@ jobs:
       - name: Start snmpd
         run: |
           docker build -t snmpify-snmpd tools/snmpd
-          docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp -p 127.0.0.1:1705:705/tcp snmpify-snmpd
+          docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp -p 127.0.0.1:1161:161/tcp -p 127.0.0.1:1705:705/tcp snmpify-snmpd
           docker run -d --name snmpify-snmptrapd -p 127.0.0.1:1162:162/udp \
             --entrypoint /usr/sbin/snmptrapd snmpify-snmpd -f -Lo -C -c /etc/snmp/snmptrapd.conf
           sleep 2
@@ -150,7 +150,7 @@ jobs:
       - name: Start snmpd
         run: |
           docker build -t snmpify-snmpd tools/snmpd
-          docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp -p 127.0.0.1:1705:705/tcp snmpify-snmpd
+          docker run -d --name snmpify-snmpd -p 127.0.0.1:1161:161/udp -p 127.0.0.1:1161:161/tcp -p 127.0.0.1:1705:705/tcp snmpify-snmpd
           docker run -d --name snmpify-snmptrapd -p 127.0.0.1:1162:162/udp \
             --entrypoint /usr/sbin/snmptrapd snmpify-snmpd -f -Lo -C -c /etc/snmp/snmptrapd.conf
           sleep 2

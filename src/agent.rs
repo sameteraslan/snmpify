@@ -420,6 +420,41 @@ impl Agent {
         }
     }
 
+    /// Serves requests over TCP (RFC 3430) on `listener` as well, one task
+    /// per connection, until accepting fails. Run it next to
+    /// [`run`](Self::run) on a shared agent:
+    ///
+    /// ```no_run
+    /// # use snmpify::agent::{Access, Agent};
+    /// # async fn f() -> std::io::Result<()> {
+    /// let agent = std::sync::Arc::new(Agent::bind("0.0.0.0:161").await?.with_community("public", Access::ReadOnly));
+    /// let tcp = tokio::net::TcpListener::bind("0.0.0.0:161").await?;
+    /// tokio::spawn(agent.clone().run_tcp(tcp));
+    /// agent.run().await
+    /// # }
+    /// ```
+    pub async fn run_tcp(self: Arc<Self>, listener: tokio::net::TcpListener) -> io::Result<()> {
+        loop {
+            let (stream, _) = listener.accept().await?;
+            let me = self.clone();
+            tokio::spawn(async move {
+                let _ = me.serve_stream(stream).await;
+            });
+        }
+    }
+
+    async fn serve_stream(&self, stream: tokio::net::TcpStream) -> io::Result<()> {
+        use tokio::io::AsyncWriteExt;
+        stream.set_nodelay(true)?;
+        let (mut read, mut write) = stream.into_split();
+        while let Some(msg) = crate::tcp::read_message(&mut read).await? {
+            if let Some(out) = self.handle(&msg) {
+                write.write_all(&out).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// The answer to one datagram, if any (for running the agent over
     /// another transport, or testing).
     pub fn handle(&self, bytes: &[u8]) -> Option<Vec<u8>> {

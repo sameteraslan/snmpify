@@ -131,6 +131,11 @@ snmpify_client *snmpify_client_new(const char *target, const char *community, in
 /* SNMPv3; context may be NULL. */
 snmpify_client *snmpify_client_new_v3(const char *target, const snmpify_user *user,
                                       const char *context);
+/* The same over TCP (RFC 3430): no retransmissions; a request waits as
+ * long as all attempts would. */
+snmpify_client *snmpify_client_new_tcp(const char *target, const char *community, int version);
+snmpify_client *snmpify_client_new_v3_tcp(const char *target, const snmpify_user *user,
+                                          const char *context);
 /* Defaults: 1000 ms per attempt, 2 retries, 25 bindings per GetBulk in walks. */
 snmpify_status snmpify_client_set_options(snmpify_client *c, uint32_t timeout_ms,
                                           uint32_t retries, uint32_t max_repetitions);

@@ -474,10 +474,48 @@ fn with_port(t: &str) -> String {
     }
 }
 
-fn connect(target: &str, c: Credentials) -> Result<snmpify_client, snmpify_status> {
-    blocking::Client::connect(&with_port(target), c)
-        .map(snmpify_client)
-        .map_err(client_error)
+fn connect(target: &str, c: Credentials, tcp: bool) -> Result<snmpify_client, snmpify_status> {
+    let t = with_port(target);
+    if tcp {
+        blocking::Client::connect_tcp(&t, c)
+    } else {
+        blocking::Client::connect(&t, c)
+    }
+    .map(snmpify_client)
+    .map_err(client_error)
+}
+
+unsafe fn community_client(
+    target: *const c_char,
+    community: *const c_char,
+    version: c_int,
+    tcp: bool,
+) -> Result<snmpify_client, snmpify_status> {
+    let community = str_arg(community, "community")?;
+    let c = match version {
+        1 => Community::v1(community),
+        2 => Community::v2c(community),
+        _ => {
+            return Err(invalid(
+                "version must be 1 or 2 (SNMPv3: snmpify_client_new_v3)",
+            ))
+        }
+    };
+    connect(str_arg(target, "target")?, c.into(), tcp)
+}
+
+unsafe fn v3_client(
+    target: *const c_char,
+    user: *const snmpify_user,
+    context: *const c_char,
+    tcp: bool,
+) -> Result<snmpify_client, snmpify_status> {
+    let user = user.as_ref().ok_or_else(|| invalid("user is NULL"))?;
+    let mut usm = Usm::new(user.0.clone());
+    if let Some(c) = opt_str(context, "context")? {
+        usm = usm.with_context(c);
+    }
+    connect(str_arg(target, "target")?, usm.into(), tcp)
 }
 
 /// A v1 (`version` 1) or v2c (`version` 2) client; `target` is "host" or
@@ -488,19 +526,7 @@ pub unsafe extern "C" fn snmpify_client_new(
     community: *const c_char,
     version: c_int,
 ) -> *mut snmpify_client {
-    guard_ptr(|| {
-        let community = str_arg(community, "community")?;
-        let c = match version {
-            1 => Community::v1(community),
-            2 => Community::v2c(community),
-            _ => {
-                return Err(invalid(
-                    "version must be 1 or 2 (SNMPv3: snmpify_client_new_v3)",
-                ))
-            }
-        };
-        connect(str_arg(target, "target")?, c.into())
-    })
+    guard_ptr(|| community_client(target, community, version, false))
 }
 
 /// An SNMPv3 client; `context` may be NULL. NULL on error.
@@ -510,14 +536,27 @@ pub unsafe extern "C" fn snmpify_client_new_v3(
     user: *const snmpify_user,
     context: *const c_char,
 ) -> *mut snmpify_client {
-    guard_ptr(|| {
-        let user = user.as_ref().ok_or_else(|| invalid("user is NULL"))?;
-        let mut usm = Usm::new(user.0.clone());
-        if let Some(c) = opt_str(context, "context")? {
-            usm = usm.with_context(c);
-        }
-        connect(str_arg(target, "target")?, usm.into())
-    })
+    guard_ptr(|| v3_client(target, user, context, false))
+}
+
+/// Like snmpify_client_new, over TCP (RFC 3430; no retransmissions).
+#[no_mangle]
+pub unsafe extern "C" fn snmpify_client_new_tcp(
+    target: *const c_char,
+    community: *const c_char,
+    version: c_int,
+) -> *mut snmpify_client {
+    guard_ptr(|| community_client(target, community, version, true))
+}
+
+/// Like snmpify_client_new_v3, over TCP.
+#[no_mangle]
+pub unsafe extern "C" fn snmpify_client_new_v3_tcp(
+    target: *const c_char,
+    user: *const snmpify_user,
+    context: *const c_char,
+) -> *mut snmpify_client {
+    guard_ptr(|| v3_client(target, user, context, true))
 }
 
 /// Timeout per attempt (ms), retries, and bindings per GetBulk in walks.

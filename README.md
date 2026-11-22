@@ -59,14 +59,14 @@ Rust crates, from their documentation (November 2026). ✓ = supported,
 | SNMPv3 auth: MD5, SHA-1, SHA-224 … SHA-512 | ✓ | ✓ | ✓ | — | — |
 | SNMPv3 privacy: DES, AES-128/192/256 | ✓ | ✓ (and 3DES) | ✓ | — | — |
 | Async (tokio) | ✓ | ✓ | ✓ | ✓ | — |
-| Blocking API | *planned* | example wrapper | ✓ | — | ✓ |
+| Blocking API | ✓ | example wrapper | ✓ | — | ✓ |
 | Many agents over one socket | ✓ | ✓ | — | — | — |
 | Timeouts and retries built in | ✓ | ✓ | timeout (blocking API) | ✓ | timeout |
 | Walk / bulk walk helper | ✓ | ✓ | — | ✓ | — |
 | Traps and informs | send and receive | send and receive | parse received | send | — |
 | Agent | ✓ (and AgentX subagent) | ✓ | — | — | — |
 | MIB names | ✓ (built in, MIB files) | ✓ (mib-rs) | ✓ (needs libnetsnmp) | — | — |
-| TCP transport | — | ✓ | — | — | — |
+| TCP transport | ✓ (client and agent) | ✓ | — | — | — |
 | Wire format usable without the client | ✓ | — | ✓ | — | ✓ |
 | Python bindings | ✓ (sync and asyncio) | — | — | — | — |
 | C, C++ API | ✓ (CMake, pkg-config) | — | — | — | — |
@@ -236,6 +236,10 @@ let oid = mib.resolve("IF-MIB::ifPhysAddress.2").unwrap();
 let vb = VarBind::new(oid, Value::OctetString(vec![0, 0x1b, 0x21, 0x3a, 0xc6, 8]));
 assert_eq!(mib.format(&vb), "IF-MIB::ifPhysAddress.2 = 00:1b:21:3a:c6:08");
 ```
+
+Over TCP (RFC 3430): `Client::connect_tcp(target, credentials)` and
+`Agent::run_tcp(listener)` (Python: `Client(..., tcp=True)`; C:
+`snmpify_client_new_tcp`).
 
 Polling many agents: `Manager::bind("0.0.0.0:0")` gives clients
 (`manager.client(addr, community)`) that share one UDP socket and receive

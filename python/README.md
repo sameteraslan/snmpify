@@ -20,7 +20,7 @@ for oid, value in c.walk("1.3.6.1.2.1.2.2.1.2"):             # GetBulk walk
     print(oid, value)
 c.set({"1.3.6.1.2.1.1.4.0": "ops@example.net"})
 
-# SNMPv3
+# SNMPv3 (and tcp=True for SNMP over TCP)
 user = snmpify.UsmUser("monitor", auth=("SHA-256", "auth-password"),
                        privacy=("AES", "priv-password"))
 v3 = snmpify.Client("192.0.2.1", user=user)

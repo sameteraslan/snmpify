@@ -165,6 +165,14 @@ public:
         : c_(detail::not_null(snmpify_client_new_v3(target.c_str(), user.get(), context)),
              snmpify_client_free) {}
 
+    // Over TCP (RFC 3430).
+    static Client tcp(const std::string& target, const std::string& community = "public", int version = 2) {
+        return Client(detail::not_null(snmpify_client_new_tcp(target.c_str(), community.c_str(), version)));
+    }
+    static Client tcp(const std::string& target, const User& user, const char* context = nullptr) {
+        return Client(detail::not_null(snmpify_client_new_v3_tcp(target.c_str(), user.get(), context)));
+    }
+
     Client& options(uint32_t timeout_ms, uint32_t retries, uint32_t max_repetitions = 25) {
         detail::check(snmpify_client_set_options(c_.get(), timeout_ms, retries, max_repetitions));
         return *this;
@@ -221,6 +229,7 @@ public:
     }
 
 private:
+    explicit Client(snmpify_client* c) : c_(c, snmpify_client_free) {}
     using Fn = snmpify_status (*)(const snmpify_client*, const char* const*, size_t, snmpify_result**);
     std::vector<VarBind> call(Fn f, const std::vector<std::string>& oids) const {
         auto c = detail::c_strs(oids);

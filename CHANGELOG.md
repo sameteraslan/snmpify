@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- SNMP over TCP (RFC 3430): `Client::connect_tcp` (no retransmissions;
+  a closed connection fails pending requests with `Error::Io`),
+  `Agent::run_tcp`, `blocking::Client::connect_tcp`, Python
+  `Client(..., tcp=True)`, C `snmpify_client_new_tcp` /
+  `snmpify_client_new_v3_tcp`. Tested against snmpd over TCP and with
+  net-snmp's snmpget / snmpbulkwalk against the agent over TCP.
 - SNMPv3 privacy `PrivProtocol::Aes192Cisco` / `Aes256Cisco`: AES-192/256
   with Cisco's key extension (draft-reeder; net-snmp's `AES-192-C`,
   pysnmp's `usmAesCfb192Protocol`). Checked against pysnmp's keys and with
