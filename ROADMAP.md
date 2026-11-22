@@ -14,7 +14,7 @@ different library per language.
 | 6 | **C and C++ API**: blocking and callback APIs, CMake package, pkg-config, prebuilt Linux/macOS/Windows archives | |
 | 7 | **Benchmarks and comparisons**: walk throughput, request latency, mass polling, CPU and memory against net-snmp (C), pysnmp, ezsnmp/easysnmp, and the Rust crates snmp2, async-snmp, csnmp; reproducible scripts | |
 | 8 | **Agent side**: a responder for custom MIB subtrees (sub-agent style), AgentX | done |
-| 9 | **MIBs**: name ↔ OID for the standard MIBs built in, loading MIB files | |
+| 9 | **MIBs**: name ↔ OID for the standard MIBs built in, loading MIB files | done |
 
 Design rules: no `unsafe` in the core, no panics on any input, no
 allocation per value where it can be avoided, every feature tested against
