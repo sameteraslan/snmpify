@@ -18,7 +18,8 @@
 
 - **Safe on hostile input.** No `unsafe`, no panics: every malformed
   packet is an error with its byte offset. Checked by a cargo-fuzz target
-  in CI and a robustness test on 70 000 random and mutated messages.
+  in CI and a robustness test on 130 000 random, mutated and SNMPv3
+  messages.
 - **Fast by design.** The decoder hands out slices of the packet instead
   of copying; the encoder writes back to front, so a nested value is never
   moved to prepend its length; OIDs up to 15 arcs live inline without
@@ -35,6 +36,65 @@
   in CI with the interop tests).
 - **Few dependencies**: none for the wire format, the RustCrypto hashes
   and ciphers for SNMPv3, tokio for the client.
+
+## Compared with other SNMP libraries
+
+Rust crates, from their documentation (November 2026). ✓ = supported,
+— = not supported or not documented, *planned* = on the snmpify
+[roadmap](ROADMAP.md).
+
+| | **snmpify** 0.1 | [async-snmp] 0.18 | [snmp2] 0.5 | [csnmp] 0.6 | [snmp] 0.2 |
+|---|---|---|---|---|---|
+| SNMPv1 / v2c | ✓ | ✓ | ✓ | v2c | v2c |
+| SNMPv3 auth: MD5, SHA-1, SHA-224 … SHA-512 | ✓ | ✓ | ✓ | — | — |
+| SNMPv3 privacy: DES, AES-128/192/256 | ✓ | ✓ (and 3DES) | ✓ | — | — |
+| Async (tokio) | ✓ | ✓ | ✓ | ✓ | — |
+| Blocking API | *planned* | example wrapper | ✓ | — | ✓ |
+| Many agents over one socket | ✓ | ✓ | — | — | — |
+| Timeouts and retries built in | ✓ | ✓ | timeout (blocking API) | ✓ | timeout |
+| Walk / bulk walk helper | ✓ | ✓ | — | ✓ | — |
+| Traps and informs | *planned* | send and receive | parse received | send | — |
+| Agent | *planned* | ✓ | — | — | — |
+| MIB names | *planned* | ✓ (mib-rs) | ✓ (needs libnetsnmp) | — | — |
+| TCP transport | — | ✓ | — | — | — |
+| Wire format usable without the client | ✓ | — | ✓ | — | ✓ |
+| Python, C, C++ bindings | *planned* | — | — | — | — |
+| Last release | 2026 | 2026 | 2026 | 2024 | 2017 |
+
+[async-snmp]: https://crates.io/crates/async-snmp
+[snmp2]: https://crates.io/crates/snmp2
+[csnmp]: https://crates.io/crates/csnmp
+[snmp]: https://crates.io/crates/snmp
+
+**Pick async-snmp** today if you need traps, an agent, MIBs or TCP: it
+is the most complete Rust SNMP library. **Pick snmp2** for a small
+blocking client. **snmpify** focuses on being hard to break and easy to
+audit:
+
+- no `unsafe`, and no panics on any input: a cargo-fuzz target and a
+  robustness test on 130 000 random, mutated and SNMPv3 messages run in
+  CI;
+- every change tested against net-snmp's snmpd, including all 31
+  SNMPv3 authentication/privacy combinations and the error reports
+  (wrong digest, unknown user, unsupported level);
+- 99% line coverage, measured in CI;
+- SNMPv3 answers accepted only at the request's security level, for
+  the right engine, inside the time window;
+- MSRV 1.85.
+
+Beyond Rust, [net-snmp] (C) is the reference implementation with every
+feature, used here as the test agent; [pysnmp] is pure Python; [ezsnmp]
+wraps net-snmp for Python; [gosnmp] is the common Go library. snmpify's
+Python and C/C++ bindings ([roadmap](ROADMAP.md) steps 5 and 6) aim at
+the first three: one fast, tested core for every language. Speed
+comparisons against all of these (walk throughput, latency, mass
+polling, CPU and memory) are step 7 and will be published with
+reproducible scripts.
+
+[net-snmp]: http://www.net-snmp.org/
+[pysnmp]: https://pypi.org/project/pysnmp/
+[ezsnmp]: https://pypi.org/project/ezsnmp/
+[gosnmp]: https://github.com/gosnmp/gosnmp
 
 ## Example
 
