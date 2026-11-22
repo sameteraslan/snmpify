@@ -53,7 +53,7 @@ Rust crates, from their documentation (November 2026). ✓ = supported,
 — = not supported or not documented, *planned* = on the snmpify
 [roadmap](ROADMAP.md).
 
-| | **snmpify** 0.1 | [async-snmp] 0.18 | [snmp2] 0.5 | [csnmp] 0.6 | [snmp] 0.2 |
+| | **snmpify** 0.2 | [async-snmp] 0.18 | [snmp2] 0.5 | [csnmp] 0.6 | [snmp] 0.2 |
 |---|---|---|---|---|---|
 | SNMPv1 / v2c | ✓ | ✓ | ✓ | v2c | v2c |
 | SNMPv3 auth: MD5, SHA-1, SHA-224 … SHA-512 | ✓ | ✓ | ✓ | — | — |
@@ -141,7 +141,7 @@ protocols, transports) for all seven libraries.
 
 ```toml
 [dependencies]
-snmpify = "0.1"
+snmpify = "0.2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

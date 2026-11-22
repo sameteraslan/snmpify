@@ -1,6 +1,6 @@
 [package]
 name = "snmpify"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Fast SNMP for Rust: BER codec, v1/v2c/v3 messages, async client and trap receiver, with Python and C/C++ bindings."
