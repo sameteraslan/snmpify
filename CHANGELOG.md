@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Notifications (`snmpify::notification`): `NotificationReceiver` takes
+  traps (v1, v2c, v3) and informs (v2c, v3, acknowledged), filtered by
+  community and SNMPv3 user, and hands them over in SNMPv2 form
+  (`Notification`: trap OID, uptime, bindings; v1 traps translated as in
+  RFC 3584). Sending: `Client::trap`, `Client::inform` (waits for the
+  acknowledgement, retries) and `Client::trap_v1`; `Usm::with_engine_id`
+  sets the engine id of SNMPv3 traps.
+- `snmpify::engine::LocalEngine`: the authoritative side of USM (RFC 3414
+  §3.2): engine discovery reports, unknown user / wrong digest /
+  decryption / security level / time window reports, usmStats
+  counters, traps from other engines with replay protection, responses
+  at the request's level. `LocalizedUser::seal_with_level`.
+- Tests against net-snmp both ways: snmpify → snmptrapd and snmptrap /
+  snmpinform → snmpify, v1, v2c and v3; the robustness test also feeds
+  the engine.
+
 ## 0.1.0 — 2026-11-22
 
 First code: the SNMP wire format and an async v1/v2c/v3 client.

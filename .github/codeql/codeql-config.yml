@@ -5,3 +5,4 @@ paths-ignore:
   - examples
   - fuzz
   - src/usm/tests.rs
+  - src/engine/tests.rs

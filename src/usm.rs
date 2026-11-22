@@ -610,19 +610,37 @@ impl LocalizedUser {
     /// authenticates the whole message. The message's engine boots and
     /// time must already be set. `salt` must not repeat for the same key;
     /// a counter does.
-    pub fn seal(&self, mut msg: V3Message, salt: u64) -> Result<Vec<u8>, UsmError> {
+    pub fn seal(&self, msg: V3Message, salt: u64) -> Result<Vec<u8>, UsmError> {
+        self.seal_with_level(msg, self.level(), salt)
+    }
+
+    /// Like [`seal`](Self::seal), at a level up to the user's (responses
+    /// go at the request's level; some reports at authNoPriv).
+    pub fn seal_with_level(
+        &self,
+        mut msg: V3Message,
+        level: SecurityLevel,
+        salt: u64,
+    ) -> Result<Vec<u8>, UsmError> {
+        if level > self.level() {
+            return Err(UsmError::UnsupportedSecurityLevel);
+        }
         if self.name.len() > 32 {
             return Err(UsmError::UserNameTooLong);
         }
         msg.usm.user_name = self.name.to_vec();
         msg.usm.engine_id.clone_from(&self.engine_id);
-        msg.flags = (msg.flags & flags::REPORTABLE) | self.level().flags();
+        msg.flags = (msg.flags & flags::REPORTABLE) | level.flags();
         msg.usm.priv_params.clear();
         msg.usm.auth_params.clear();
         let ScopedPduData::Plaintext(scoped) = &msg.data else {
             return Err(UsmError::UnsupportedSecurityLevel);
         };
-        if let Some((p, key)) = &self.privacy {
+        let privacy = self
+            .privacy
+            .as_ref()
+            .filter(|_| level == SecurityLevel::AuthPriv);
+        if let Some((p, key)) = privacy {
             let (cipher, params) = p.encrypt(
                 key,
                 msg.usm.engine_boots,
@@ -633,7 +651,11 @@ impl LocalizedUser {
             msg.usm.priv_params = params;
             msg.data = ScopedPduData::Encrypted(cipher);
         }
-        let Some((a, key)) = &self.auth else {
+        let Some((a, key)) = self
+            .auth
+            .as_ref()
+            .filter(|_| level != SecurityLevel::NoAuthNoPriv)
+        else {
             return Ok(msg.encode());
         };
         msg.usm.auth_params = vec![0; a.mac_len()];

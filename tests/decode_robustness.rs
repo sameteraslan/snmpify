@@ -152,6 +152,12 @@ fn random_v3_shaped_bytes() {
     // A valid v3 header followed by noise: exercises the USM decoder.
     let keys = v3_users();
     let good = v3_sample(&keys[1]);
+    // The authoritative side too: never a panic, whatever arrives.
+    let engine = snmpify::engine::LocalEngine::new(ENGINE).with_user(
+        UsmUser::new("u")
+            .with_auth(AuthProtocol::Md5, "auth-pass")
+            .unwrap(),
+    );
     let mut rng = Rng(99);
     for _ in 0..20_000 {
         let cut = (rng.next() as usize) % good.len();
@@ -162,6 +168,7 @@ fn random_v3_shaped_bytes() {
         for k in &keys {
             let _ = k.open(&m);
         }
+        let _ = engine.receive(&m);
     }
 }
 

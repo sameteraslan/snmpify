@@ -51,6 +51,8 @@ use tokio::net::{lookup_host, UdpSocket};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::engine::LocalEngine;
+use crate::notification::notification_varbinds;
 use crate::usm::{LocalizedUser, SecurityLevel, UsmError, UsmUser};
 use crate::v3::{
     flags, peek_msg_id, ReportKind, ScopedPdu, ScopedPduData, UsmParams, V3Message,
@@ -227,6 +229,7 @@ impl Community {
 pub struct Usm {
     user: UsmUser,
     context_name: Vec<u8>,
+    engine_id: Option<Vec<u8>>,
 }
 
 impl Usm {
@@ -235,7 +238,17 @@ impl Usm {
         Self {
             user,
             context_name: Vec::new(),
+            engine_id: None,
         }
+    }
+
+    /// This side's engine id, used when sending SNMPv3 traps (the sender
+    /// of a trap is the authoritative engine). Default: a random one per
+    /// client ([`LocalEngine::generate_id`]); receivers that check the
+    /// engine id need a fixed one.
+    pub fn with_engine_id(mut self, id: impl Into<Vec<u8>>) -> Self {
+        self.engine_id = Some(id.into());
+        self
     }
 
     /// Addresses a named context (e.g. a VLAN or a VRF on some agents).
@@ -334,6 +347,8 @@ struct Shared {
     /// Privacy salts: must not repeat for a key, so a counter.
     next_salt: AtomicU64,
     check_source: bool,
+    /// For sysUpTime.0 in notifications.
+    start: Instant,
 }
 
 impl Shared {
@@ -372,6 +387,7 @@ impl Transport {
             next_id: AtomicU32::new(seed),
             next_salt: AtomicU64::new(((seed as u64) << 32) ^ seed.rotate_left(7) as u64),
             check_source,
+            start: Instant::now(),
         });
         let task = tokio::spawn(receive(shared.clone()));
         Ok(Arc::new(Transport { shared, task }))
@@ -593,6 +609,8 @@ struct Session {
     usm: Usm,
     engine: Mutex<Option<Arc<Engine>>>,
     discovery: tokio::sync::Mutex<()>,
+    /// This side as the authoritative engine, for traps.
+    local: LocalEngine,
 }
 
 impl Session {
@@ -636,11 +654,19 @@ impl Security {
     fn new(c: Credentials) -> Self {
         match c {
             Credentials::Community(c) => Security::Community(c),
-            Credentials::Usm(usm) => Security::Usm(Arc::new(Session {
-                usm,
-                engine: Mutex::new(None),
-                discovery: tokio::sync::Mutex::new(()),
-            })),
+            Credentials::Usm(usm) => {
+                let id = usm
+                    .engine_id
+                    .clone()
+                    .unwrap_or_else(LocalEngine::generate_id);
+                let local = LocalEngine::new(id).with_user(usm.user.clone());
+                Security::Usm(Arc::new(Session {
+                    usm,
+                    engine: Mutex::new(None),
+                    discovery: tokio::sync::Mutex::new(()),
+                    local,
+                }))
+            }
         }
     }
 }
@@ -962,6 +988,87 @@ impl Client {
             return Err(Error::InvalidArgument("no bindings"));
         }
         self.checked(Pdu::set(0, varbinds)).await
+    }
+
+    /// Hundredths of a second since the client's socket was made: the
+    /// sysUpTime.0 sent with notifications.
+    pub fn uptime(&self) -> u32 {
+        (self.transport.shared.start.elapsed().as_millis() / 10) as u32
+    }
+
+    /// Sends an SNMPv2 trap (v2c or v3; unconfirmed, nothing comes back):
+    /// sysUpTime.0, snmpTrapOID.0 = `trap_oid`, then `varbinds`. With
+    /// SNMPv3 this side is the authoritative engine
+    /// ([`Usm::with_engine_id`]).
+    pub async fn trap(&self, trap_oid: impl IntoOid, varbinds: Vec<VarBind>) -> Result<()> {
+        let trap_oid = trap_oid.into_oid()?;
+        let id = self.transport.next_id();
+        let pdu = Pdu {
+            pdu_type: PduType::TrapV2,
+            request_id: id,
+            error_status: 0,
+            error_index: 0,
+            varbinds: notification_varbinds(self.uptime(), trap_oid, varbinds),
+        };
+        let bytes = match &self.security {
+            Security::Community(c) if c.version == Version::V1 => {
+                return Err(Error::InvalidArgument(
+                    "SNMPv1 has its own trap format: use trap_v1",
+                ))
+            }
+            Security::Community(c) => CommunityMessage::new(c.version, &c.community, pdu).encode(),
+            Security::Usm(s) => s
+                .local
+                .originate(s.usm.user.name(), id, &s.usm.context_name, pdu)
+                .map_err(Error::Usm)?,
+        };
+        self.transport
+            .shared
+            .socket
+            .send_to(&bytes, self.target)
+            .await?;
+        Ok(())
+    }
+
+    /// Sends an SNMPv1 Trap-PDU (SNMPv1 only).
+    pub async fn trap_v1(&self, trap: crate::TrapV1Pdu) -> Result<()> {
+        let c = match &self.security {
+            Security::Community(c) if c.version == Version::V1 => c,
+            _ => {
+                return Err(Error::InvalidArgument(
+                    "trap_v1 needs SNMPv1; use trap for v2c and v3",
+                ))
+            }
+        };
+        let bytes = CommunityMessage::new(Version::V1, &c.community, trap).encode();
+        self.transport
+            .shared
+            .socket
+            .send_to(&bytes, self.target)
+            .await?;
+        Ok(())
+    }
+
+    /// Sends an InformRequest (v2c or v3) and waits for the receiver's
+    /// acknowledgement, retrying like any request. With SNMPv3 the
+    /// receiver is the authoritative engine, discovered first.
+    pub async fn inform(
+        &self,
+        trap_oid: impl IntoOid,
+        varbinds: Vec<VarBind>,
+    ) -> Result<Vec<VarBind>> {
+        if self.version() == Version::V1 {
+            return Err(Error::InvalidArgument("informs need SNMPv2c or v3"));
+        }
+        let trap_oid = trap_oid.into_oid()?;
+        let pdu = Pdu {
+            pdu_type: PduType::Inform,
+            request_id: 0,
+            error_status: 0,
+            error_index: 0,
+            varbinds: notification_varbinds(self.uptime(), trap_oid, varbinds),
+        };
+        self.checked(pdu).await
     }
 
     /// Walks the subtree under `root`: GetBulk in v2c, GetNext in v1.

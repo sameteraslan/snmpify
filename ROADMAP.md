@@ -9,7 +9,7 @@ different library per language.
 | 1 | **Wire format**: BER codec, OIDs, values, all PDUs, v1/v2c messages; robustness tests, fuzzing, interop tests against net-snmp | done |
 | 2 | **Async client** (tokio): get, get-next, get-bulk, set, walk and bulk walk as streams, timeouts and retries, request-id matching; one socket shared by thousands of targets for mass polling; a blocking wrapper | done (the blocking wrapper still to do) |
 | 3 | **SNMPv3 / USM**: engine discovery and time sync, authentication MD5, SHA-1, SHA-224/256/384/512 (RFC 3414, 7860), privacy DES, AES-128/192/256 (RFC 3826 and the common 192/256 extension); key localisation cache; tested against snmpd for every combination | done (the Cisco/Reeder AES-192/256 key extension still to do) |
-| 4 | **Notifications**: trap (v1, v2c, v3) and inform receiver with acknowledgements; sending traps and informs | |
+| 4 | **Notifications**: trap (v1, v2c, v3) and inform receiver with acknowledgements; sending traps and informs | done |
 | 5 | **Python bindings** (PyO3, PyPI `snmpify`): sync and asyncio APIs, walks as iterators, values as Python types | |
 | 6 | **C and C++ API**: blocking and callback APIs, CMake package, pkg-config, prebuilt Linux/macOS/Windows archives | |
 | 7 | **Benchmarks and comparisons**: walk throughput, request latency, mass polling, CPU and memory against net-snmp (C), pysnmp, ezsnmp/easysnmp, and the Rust crates snmp2, async-snmp, csnmp; reproducible scripts | |
