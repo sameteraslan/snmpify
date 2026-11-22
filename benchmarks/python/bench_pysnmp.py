@@ -5,9 +5,10 @@ import time
 from pysnmp.hlapi.v3arch.asyncio import (
     CommunityData, ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget,
     UsmUserData, bulk_walk_cmd, get_cmd, usmAesCfb128Protocol, usmHMACSHAAuthProtocol,
+    bulk_cmd, next_cmd, set_cmd, send_notification, NotificationType, OctetString, Integer32,
 )
 
-from common import MAX_REP, SYS_NAME, TABLE, args, report, unsupported
+from common import BULK_REP, IF_INDEX, LINK_DOWN, MAX_REP, SYS_NAME, TABLE, WRITABLE, args, report, unsupported
 
 scenario, host, port, n = args()
 
@@ -47,6 +48,32 @@ async def main():
             return not err and not status
         res = await asyncio.gather(*(one(k) for k in range(1, n + 1)))
         report(sum(res), t0)
+    elif scenario in ("getnext", "bulk", "set", "trap", "inform"):
+        p = port - 1 if scenario in ("trap", "inform") else port
+        target = await UdpTransportTarget.create((host, p), timeout=1, retries=2)
+        auth = CommunityData("private" if scenario == "set" else "public")
+        lat, items = [], 0
+        for i in range(n):
+            s = time.perf_counter()
+            if scenario == "getnext":
+                err, status, _idx, vbs = await next_cmd(engine, auth, target, ContextData(),
+                                                        ObjectType(ObjectIdentity(SYS_NAME)))
+            elif scenario == "bulk":
+                err, status, _idx, vbs = await bulk_cmd(engine, auth, target, ContextData(), 0, BULK_REP,
+                                                        ObjectType(ObjectIdentity(TABLE)))
+            elif scenario == "set":
+                err, status, _idx, vbs = await set_cmd(engine, auth, target, ContextData(),
+                                                       ObjectType(ObjectIdentity(WRITABLE), OctetString(f"value {i}")))
+            else:
+                err, status, _idx, vbs = await send_notification(
+                    engine, auth, target, ContextData(), scenario,
+                    NotificationType(ObjectIdentity(LINK_DOWN)).add_varbinds(
+                        ObjectType(ObjectIdentity(IF_INDEX), Integer32(7))))
+                vbs = [1]
+            assert not err and not status, (err, status)
+            items += len(vbs)
+            lat.append((time.perf_counter() - s) * 1e6)
+        report(items, t0, lat)
     elif scenario == "idle":
         report(0, t0)
     else:

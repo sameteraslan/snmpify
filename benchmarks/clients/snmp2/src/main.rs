@@ -67,7 +67,10 @@ async fn main() {
             let mut lat = Vec::with_capacity(a.n);
             for _ in 0..a.n {
                 let st = Instant::now();
-                tokio::time::timeout(Duration::from_secs(1), s.get(&o)).await.unwrap().unwrap();
+                tokio::time::timeout(Duration::from_secs(1), s.get(&o))
+                    .await
+                    .unwrap()
+                    .unwrap();
                 lat.push(st.elapsed().as_secs_f64() * 1e6);
             }
             report(a.n, t.elapsed().as_secs_f64() * 1e3, &mut lat);
@@ -83,7 +86,10 @@ async fn main() {
                             return false;
                         };
                         let o = oid(SYS_NAME);
-                        matches!(tokio::time::timeout(Duration::from_secs(1), s.get(&o)).await, Ok(Ok(_)))
+                        matches!(
+                            tokio::time::timeout(Duration::from_secs(1), s.get(&o)).await,
+                            Ok(Ok(_))
+                        )
                     })
                 })
                 .collect();
@@ -92,6 +98,45 @@ async fn main() {
                 ok += t.await.unwrap() as usize;
             }
             report(ok, t.elapsed().as_secs_f64() * 1e3, &mut []);
+        }
+        "getnext" | "bulk" | "set" => {
+            let community: &[u8] = if a.scenario == "set" {
+                b"private"
+            } else {
+                b"public"
+            };
+            let mut s = AsyncSession::new_v2c(&target, community, 0).await.unwrap();
+            let (name, table, w) = (oid(SYS_NAME), oid(TABLE), oid(WRITABLE));
+            let mut lat = Vec::with_capacity(a.n);
+            let mut items = 0;
+            for i in 0..a.n {
+                let st = Instant::now();
+                let v = format!("value {i}");
+                let pdu = match a.scenario.as_str() {
+                    "getnext" => {
+                        tokio::time::timeout(Duration::from_secs(1), s.getnext(&name)).await
+                    }
+                    "bulk" => {
+                        tokio::time::timeout(
+                            Duration::from_secs(1),
+                            s.getbulk(&[&table], 0, BULK_REP),
+                        )
+                        .await
+                    }
+                    _ => {
+                        tokio::time::timeout(
+                            Duration::from_secs(1),
+                            s.set(&[(&w, Value::OctetString(v.as_bytes()))]),
+                        )
+                        .await
+                    }
+                }
+                .unwrap()
+                .unwrap();
+                items += pdu.varbinds.count();
+                lat.push(st.elapsed().as_secs_f64() * 1e6);
+            }
+            report(items, t.elapsed().as_secs_f64() * 1e3, &mut lat);
         }
         "idle" => report(0, 0.0, &mut []),
         _ => unsupported(),

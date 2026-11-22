@@ -292,12 +292,16 @@ pub enum PrivProtocol {
     Aes192Cisco,
     /// CFB128-AES-256, Cisco's key extension (net-snmp's `AES-256-C`).
     Aes256Cisco,
+    /// CBC-3DES-EDE (draft-reeder-snmpv3-usm-3desede-00; pysnmp's
+    /// `usm3DESEDEPrivProtocol`). For old agents only.
+    Des3,
 }
 
 impl PrivProtocol {
     /// The standard protocols (net-snmp's DES, AES, AES-192, AES-256);
-    /// [`Aes192Cisco`](Self::Aes192Cisco) and
-    /// [`Aes256Cisco`](Self::Aes256Cisco) are not in it.
+    /// [`Aes192Cisco`](Self::Aes192Cisco),
+    /// [`Aes256Cisco`](Self::Aes256Cisco) and [`Des3`](Self::Des3) are not
+    /// in it.
     pub const ALL: [PrivProtocol; 4] = [
         PrivProtocol::Des,
         PrivProtocol::Aes128,
@@ -311,7 +315,7 @@ impl PrivProtocol {
         match self {
             PrivProtocol::Des | PrivProtocol::Aes128 => 16,
             PrivProtocol::Aes192 | PrivProtocol::Aes192Cisco => 24,
-            PrivProtocol::Aes256 | PrivProtocol::Aes256Cisco => 32,
+            PrivProtocol::Aes256 | PrivProtocol::Aes256Cisco | PrivProtocol::Des3 => 32,
         }
     }
 
@@ -324,7 +328,10 @@ impl PrivProtocol {
     /// Kul ‖ localize(P2K(Kul)) ….
     pub fn localize(self, auth: AuthProtocol, master_key: &[u8], engine_id: &[u8]) -> Vec<u8> {
         let mut k = auth.localize(master_key, engine_id);
-        let cisco = matches!(self, PrivProtocol::Aes192Cisco | PrivProtocol::Aes256Cisco);
+        let cisco = matches!(
+            self,
+            PrivProtocol::Aes192Cisco | PrivProtocol::Aes256Cisco | PrivProtocol::Des3
+        );
         while k.len() < self.key_len() {
             let more = if cisco {
                 let ku = with_hash!(auth, password_to_key(&k));
@@ -349,12 +356,13 @@ impl PrivProtocol {
         plain: &[u8],
     ) -> (Vec<u8>, Vec<u8>) {
         match self {
-            PrivProtocol::Des => {
-                // RFC 3414 §8.1.1.1: salt = boots ‖ counter, IV = pre-IV ⊕ salt.
+            PrivProtocol::Des | PrivProtocol::Des3 => {
+                // RFC 3414 §8.1.1.1: salt = boots ‖ counter, IV = pre-IV ⊕ salt
+                // (3DES: the same with a 24-octet key, draft-reeder §5.1).
                 let s = ((u64::from(boots) << 32) | (salt & 0xFFFF_FFFF)).to_be_bytes();
                 let mut data = plain.to_vec();
                 data.resize(plain.len().div_ceil(8) * 8, 0);
-                des_cbc(key, &s, &mut data, false);
+                des_cbc(self, key, &s, &mut data, false);
                 (data, s.to_vec())
             }
             _ => {
@@ -377,11 +385,11 @@ impl PrivProtocol {
         let salt: [u8; 8] = params.try_into().map_err(|_| UsmError::DecryptionError)?;
         let mut data = cipher.to_vec();
         match self {
-            PrivProtocol::Des => {
+            PrivProtocol::Des | PrivProtocol::Des3 => {
                 if data.len() % 8 != 0 {
                     return Err(UsmError::DecryptionError);
                 }
-                des_cbc(key, &salt, &mut data, true);
+                des_cbc(self, key, &salt, &mut data, true);
             }
             _ => aes_cfb(self, key, &aes_iv(boots, time, &salt), &mut data, true),
         }
@@ -398,34 +406,50 @@ impl fmt::Display for PrivProtocol {
             PrivProtocol::Aes256 => "AES-256",
             PrivProtocol::Aes192Cisco => "AES-192-C",
             PrivProtocol::Aes256Cisco => "AES-256-C",
+            PrivProtocol::Des3 => "3DES",
         })
     }
 }
 
-fn des_cbc(key: &[u8], salt: &[u8; 8], data: &mut [u8], decrypt: bool) {
-    let cipher = des::Des::new_from_slice(&key[..8]).expect("DES key is 8 bytes");
-    let mut prev = [0u8; 8];
-    for (p, (k, s)) in prev.iter_mut().zip(key[8..16].iter().zip(salt)) {
-        *p = k ^ s;
-    }
-    for chunk in data.chunks_exact_mut(8) {
-        let mut b = Block::<des::Des>::default();
-        if decrypt {
-            b.copy_from_slice(chunk);
-            let c: [u8; 8] = b.into();
-            cipher.decrypt_block(&mut b);
-            for (o, (x, p)) in chunk.iter_mut().zip(b.iter().zip(&prev)) {
-                *o = x ^ p;
-            }
-            prev = c;
-        } else {
-            for (o, (x, p)) in b.iter_mut().zip(chunk.iter().zip(&prev)) {
-                *o = x ^ p;
-            }
-            cipher.encrypt_block(&mut b);
-            chunk.copy_from_slice(&b);
-            prev.copy_from_slice(&b);
+/// CBC with DES (key 0..8, pre-IV 8..16) or 3DES-EDE (key 0..24, pre-IV
+/// 24..32); IV = pre-IV ⊕ salt.
+fn des_cbc(p: PrivProtocol, key: &[u8], salt: &[u8; 8], data: &mut [u8], decrypt: bool) {
+    fn run<C: BlockCipherEncrypt + BlockCipherDecrypt + KeyInit>(
+        key: &[u8],
+        pre_iv: &[u8],
+        salt: &[u8; 8],
+        data: &mut [u8],
+        decrypt: bool,
+    ) {
+        let cipher = C::new_from_slice(key).expect("key length matches the cipher");
+        let mut prev = [0u8; 8];
+        for (p, (k, s)) in prev.iter_mut().zip(pre_iv.iter().zip(salt)) {
+            *p = k ^ s;
         }
+        for chunk in data.chunks_exact_mut(8) {
+            let mut b = Block::<C>::default();
+            if decrypt {
+                b.copy_from_slice(chunk);
+                let mut c = [0u8; 8];
+                c.copy_from_slice(chunk);
+                cipher.decrypt_block(&mut b);
+                for (o, (x, p)) in chunk.iter_mut().zip(b.iter().zip(&prev)) {
+                    *o = x ^ p;
+                }
+                prev = c;
+            } else {
+                for (o, (x, p)) in b.iter_mut().zip(chunk.iter().zip(&prev)) {
+                    *o = x ^ p;
+                }
+                cipher.encrypt_block(&mut b);
+                chunk.copy_from_slice(&b);
+                prev.copy_from_slice(&b);
+            }
+        }
+    }
+    match p {
+        PrivProtocol::Des3 => run::<des::TdesEde3>(&key[..24], &key[24..32], salt, data, decrypt),
+        _ => run::<des::Des>(&key[..8], &key[8..16], salt, data, decrypt),
     }
 }
 
@@ -469,7 +493,7 @@ fn aes_cfb(p: PrivProtocol, key: &[u8], iv: &[u8; 16], data: &mut [u8], decrypt:
         PrivProtocol::Aes256 | PrivProtocol::Aes256Cisco => {
             run::<aes::Aes256>(key, iv, data, decrypt)
         }
-        PrivProtocol::Des => unreachable!("DES is CBC"),
+        PrivProtocol::Des | PrivProtocol::Des3 => unreachable!("DES and 3DES are CBC"),
     }
 }
 

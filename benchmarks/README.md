@@ -39,71 +39,133 @@ Versions: snmp2 0.5.3, async-snmp 0.18.1, csnmp 0.6.0, pysnmp 7.1.33, ezsnmp 2.5
 
 | | Time | Objects/s | CPU | CPU, work | Peak RSS |
 |---|---:|---:|---:|---:|---:|
-| snmpify | 134 ms | 1,487,675 | 46 ms | 43 ms | 3.3 MB |
-| snmpify (owned values) | 138 ms | 1,449,601 | 52 ms | 47 ms | 4.6 MB |
-| snmp2 | 135 ms | 1,481,646 | 48 ms | 43 ms | 4.2 MB |
-| async-snmp | 173 ms | 1,153,429 | 82 ms | 78 ms | 3.9 MB |
-| csnmp | 475 ms | 421,318 | 373 ms | 370 ms | 22.6 MB |
-| net-snmp (C) | 163 ms | 1,223,743 | 60 ms | 60 ms | 8.2 MB |
-| snmpify (Python) | 248 ms | 806,757 | 199 ms | 154 ms | 23.0 MB |
-| ezsnmp (Python) | 2421 ms | 82,619 | 2294 ms | 2271 ms | 29.0 MB |
-| pysnmp (Python) | 19548 ms | 10,231 | 18229 ms | 18124 ms | 37.6 MB |
+| snmpify | 140 ms | 1,432,470 | 45 ms | 42 ms | 3.3 MB |
+| snmpify (owned values) | 147 ms | 1,365,104 | 56 ms | 54 ms | 4.7 MB |
+| snmp2 | 141 ms | 1,418,601 | 53 ms | 48 ms | 5.4 MB |
+| async-snmp | 185 ms | 1,083,917 | 89 ms | 85 ms | 4.0 MB |
+| csnmp | 457 ms | 437,303 | 350 ms | 348 ms | 22.7 MB |
+| net-snmp (C) | 158 ms | 1,263,376 | 50 ms | 50 ms | 8.4 MB |
+| snmpify (Python) | 275 ms | 728,054 | 221 ms | 177 ms | 22.9 MB |
+| ezsnmp (Python) | 2444 ms | 81,831 | 2326 ms | 2303 ms | 29.2 MB |
+| pysnmp (Python) | 19794 ms | 10,104 | 18392 ms | 18284 ms | 37.2 MB |
 
 ### walk3: the same over SNMPv3 authPriv (SHA, AES-128)
 
 | | Time | Objects/s | CPU | CPU, work | Peak RSS |
 |---|---:|---:|---:|---:|---:|
-| snmpify | 190 ms | 1,055,370 | 76 ms | 72 ms | 3.3 MB |
-| snmpify (owned values) | 183 ms | 1,093,057 | 69 ms | 64 ms | 5.3 MB |
-| snmp2 | 192 ms | 1,040,226 | 77 ms | 72 ms | 4.2 MB |
-| async-snmp | 232 ms | 863,647 | 121 ms | 116 ms | 4.0 MB |
+| snmpify | 193 ms | 1,033,741 | 77 ms | 74 ms | 3.2 MB |
+| snmpify (owned values) | 183 ms | 1,094,355 | 74 ms | 72 ms | 5.2 MB |
+| snmp2 | 190 ms | 1,052,122 | 78 ms | 72 ms | 5.4 MB |
+| async-snmp | 237 ms | 845,641 | 121 ms | 117 ms | 4.1 MB |
 | csnmp | n/a | n/a | n/a | n/a | n/a |
-| net-snmp (C) | 227 ms | 880,852 | 100 ms | 100 ms | 8.4 MB |
-| snmpify (Python) | 312 ms | 641,964 | 236 ms | 191 ms | 23.0 MB |
-| ezsnmp (Python) | 2530 ms | 79,051 | 2388 ms | 2365 ms | 28.6 MB |
-| pysnmp (Python) | 21896 ms | 9,134 | 20435 ms | 20330 ms | 38.9 MB |
+| net-snmp (C) | 238 ms | 838,796 | 110 ms | 110 ms | 8.3 MB |
+| snmpify (Python) | 324 ms | 617,862 | 235 ms | 192 ms | 23.0 MB |
+| ezsnmp (Python) | 2653 ms | 75,385 | 2482 ms | 2458 ms | 28.1 MB |
+| pysnmp (Python) | 22474 ms | 8,899 | 20932 ms | 20825 ms | 38.6 MB |
 
 ### get: 5000 sequential GetRequests for one object
 
 | | Time | Latency p50 | Latency p99 | CPU, work | Peak RSS |
 |---|---:|---:|---:|---:|---:|
-| snmpify | 47 ms | 8 µs | 21 µs | 26 ms | 3.3 MB |
-| snmpify (owned values) | 48 ms | 8 µs | 24 µs | 27 ms | 3.2 MB |
-| snmp2 | 46 ms | 8 µs | 23 µs | 25 ms | 4.2 MB |
-| async-snmp | 62 ms | 11 µs | 34 µs | 40 ms | 3.9 MB |
-| csnmp | 66 ms | 12 µs | 38 µs | 48 ms | 2.9 MB |
-| net-snmp (C) | 47 ms | 9 µs | 11 µs | 20 ms | 8.2 MB |
-| snmpify (Python) | 61 ms | 11 µs | 18 µs | 49 ms | 23.3 MB |
-| ezsnmp (Python) | 100 ms | 16 µs | 40 µs | 79 ms | 20.7 MB |
-| pysnmp (Python) | 2190 ms | 422 µs | 715 µs | 1752 ms | 37.0 MB |
+| snmpify | 46 ms | 8 µs | 20 µs | 27 ms | 3.4 MB |
+| snmp2 | 44 ms | 8 µs | 15 µs | 23 ms | 5.5 MB |
+| async-snmp | 55 ms | 10 µs | 21 µs | 35 ms | 4.0 MB |
+| csnmp | 61 ms | 10 µs | 33 µs | 41 ms | 3.0 MB |
+| net-snmp (C) | 47 ms | 9 µs | 17 µs | 20 ms | 8.2 MB |
+| snmpify (Python) | 60 ms | 10 µs | 18 µs | 49 ms | 23.3 MB |
+| ezsnmp (Python) | 125 ms | 24 µs | 67 µs | 101 ms | 20.8 MB |
+| pysnmp (Python) | 2252 ms | 431 µs | 736 µs | 1782 ms | 36.9 MB |
+
+### getnext: 2000 sequential GetNextRequests
+
+| | Time | Latency p50 | Latency p99 | CPU, work | Peak RSS |
+|---|---:|---:|---:|---:|---:|
+| snmpify | 22 ms | 8 µs | 23 µs | 13 ms | 3.3 MB |
+| snmp2 | 21 ms | 8 µs | 24 µs | 10 ms | 5.5 MB |
+| async-snmp | 30 ms | 11 µs | 44 µs | 19 ms | 3.9 MB |
+| csnmp | 31 ms | 11 µs | 39 µs | 23 ms | 2.9 MB |
+| net-snmp (C) | 19 ms | 9 µs | 17 µs | 0 ms | 8.2 MB |
+| snmpify (Python) | 29 ms | 11 µs | 26 µs | 24 ms | 23.3 MB |
+| ezsnmp (Python) | 51 ms | 24 µs | 72 µs | 41 ms | 20.3 MB |
+| pysnmp (Python) | 908 ms | 433 µs | 752 µs | 729 ms | 37.2 MB |
+
+### bulk: 2000 sequential GetBulkRequests, 50 rows each (100 000 objects)
+
+| | Time | Latency p50 | Latency p99 | CPU, work | Peak RSS |
+|---|---:|---:|---:|---:|---:|
+| snmpify | 58 ms | 24 µs | 81 µs | 17 ms | 3.2 MB |
+| snmp2 | 52 ms | 23 µs | 102 µs | 13 ms | 5.4 MB |
+| async-snmp | 65 ms | 28 µs | 157 µs | 25 ms | 4.0 MB |
+| csnmp | 169 ms | 75 µs | 306 µs | 125 ms | 3.4 MB |
+| net-snmp (C) | 59 ms | 28 µs | 63 µs | 10 ms | 8.3 MB |
+| snmpify (Python) | 84 ms | 39 µs | 214 µs | 53 ms | 23.2 MB |
+| ezsnmp (Python) | 257 ms | 117 µs | 328 µs | 210 ms | 20.3 MB |
+| pysnmp (Python) | 8728 ms | 4304 µs | 7733 µs | 8295 ms | 37.2 MB |
+
+### set: 2000 sequential SetRequests (an OCTET STRING)
+
+| | Time | Latency p50 | Latency p99 | CPU, work | Peak RSS |
+|---|---:|---:|---:|---:|---:|
+| snmpify | 23 ms | 8 µs | 30 µs | 13 ms | 3.2 MB |
+| snmp2 | 22 ms | 9 µs | 23 µs | 12 ms | 5.5 MB |
+| async-snmp | 31 ms | 11 µs | 42 µs | 20 ms | 4.0 MB |
+| csnmp | 33 ms | 12 µs | 41 µs | 25 ms | 3.1 MB |
+| net-snmp (C) | 20 ms | 10 µs | 12 µs | 0 ms | 8.1 MB |
+| snmpify (Python) | 27 ms | 11 µs | 20 µs | 25 ms | 23.0 MB |
+| ezsnmp (Python) | 57 ms | 26 µs | 137 µs | 46 ms | 20.3 MB |
+| pysnmp (Python) | 987 ms | 464 µs | 781 µs | 791 ms | 36.8 MB |
+
+### trap: 2000 SNMPv2c traps sent (no answer; the time to hand each to the socket)
+
+| | Time | Latency p50 | Latency p99 | CPU, work | Peak RSS |
+|---|---:|---:|---:|---:|---:|
+| snmpify | 7 ms | 2 µs | 7 µs | 7 ms | 3.3 MB |
+| snmp2 | n/a | n/a | n/a | n/a | n/a |
+| async-snmp | 8 ms | 3 µs | 8 µs | 7 ms | 4.0 MB |
+| csnmp | 16 ms | 6 µs | 17 µs | 17 ms | 3.1 MB |
+| net-snmp (C) | 6 ms | 3 µs | 3 µs | 0 ms | 8.4 MB |
+| snmpify (Python) | 8 ms | 3 µs | 5 µs | 14 ms | 23.0 MB |
+| ezsnmp (Python) | 224 ms | 106 µs | 238 µs | 222 ms | 20.2 MB |
+| pysnmp (Python) | 535 ms | 256 µs | 278 µs | 534 ms | 37.2 MB |
+
+### inform: 2000 SNMPv2c informs, each waiting for its acknowledgement
+
+| | Time | Latency p50 | Latency p99 | CPU, work | Peak RSS |
+|---|---:|---:|---:|---:|---:|
+| snmpify | 24 ms | 8 µs | 26 µs | 15 ms | 3.3 MB |
+| snmp2 | n/a | n/a | n/a | n/a | n/a |
+| async-snmp | 30 ms | 11 µs | 37 µs | 21 ms | 4.0 MB |
+| csnmp | 41 ms | 16 µs | 147 µs | 33 ms | 3.2 MB |
+| net-snmp (C) | 21 ms | 10 µs | 14 µs | 10 ms | 8.2 MB |
+| snmpify (Python) | 30 ms | 12 µs | 22 µs | 27 ms | 23.3 MB |
+| ezsnmp (Python) | 268 ms | 118 µs | 297 µs | 246 ms | 20.2 MB |
+| pysnmp (Python) | 1591 ms | 741 µs | 1092 µs | 1373 ms | 37.7 MB |
 
 ### poll: 1000 agents, one GetRequest each, all at once
 
 | | Time | Answered | CPU | CPU, work | Peak RSS |
 |---|---:|---:|---:|---:|---:|
-| snmpify | 8 ms | 1000 / 1000 | 11 ms | 7 ms | 5.5 MB |
-| snmpify (owned values) | 9 ms | 1000 / 1000 | 13 ms | 8 ms | 5.4 MB |
-| snmp2 | 86 ms | 1000 / 1000 | 90 ms | 85 ms | 133.5 MB |
-| async-snmp | 4020 ms | 1000 / 1000 | 35 ms | 31 ms | 10.2 MB |
-| csnmp | 27 ms | 1000 / 1000 | 31 ms | 27 ms | 18.4 MB |
-| net-snmp (C) | 12 ms | 1000 / 1000 | 10 ms | 10 ms | 10.8 MB |
-| snmpify (Python) | 31 ms | 1000 / 1000 | 107 ms | 62 ms | 33.7 MB |
-| ezsnmp (Python) | 163 ms | 1000 / 1000 | 171 ms | 148 ms | 20.1 MB |
-| pysnmp (Python) | 4255 ms | 663 / 1000 | 1552 ms | 1448 ms | 66.7 MB |
+| snmpify | 9 ms | 1000 / 1000 | 12 ms | 9 ms | 5.5 MB |
+| snmp2 | 85 ms | 1000 / 1000 | 90 ms | 85 ms | 134.8 MB |
+| async-snmp | 4023 ms | 1000 / 1000 | 36 ms | 32 ms | 10.2 MB |
+| csnmp | 24 ms | 1000 / 1000 | 28 ms | 26 ms | 18.4 MB |
+| net-snmp (C) | 12 ms | 1000 / 1000 | 10 ms | 10 ms | 11.0 MB |
+| snmpify (Python) | 29 ms | 1000 / 1000 | 104 ms | 61 ms | 34.1 MB |
+| ezsnmp (Python) | 176 ms | 1000 / 1000 | 191 ms | 167 ms | 20.0 MB |
+| pysnmp (Python) | 4275 ms | 663 / 1000 | 1562 ms | 1454 ms | 66.9 MB |
 
 ### idle: start, load the library, exit
 
 | | CPU | Peak RSS |
 |---|---:|---:|
-| snmpify | 4 ms | 3.1 MB |
-| snmpify (owned values) | 5 ms | 3.1 MB |
-| snmp2 | 5 ms | 4.0 MB |
-| async-snmp | 4 ms | 3.3 MB |
-| csnmp | 4 ms | 2.9 MB |
-| net-snmp (C) | 0 ms | 8.2 MB |
-| snmpify (Python) | 45 ms | 21.7 MB |
-| ezsnmp (Python) | 23 ms | 17.5 MB |
-| pysnmp (Python) | 104 ms | 36.8 MB |
+| snmpify | 3 ms | 3.1 MB |
+| snmp2 | 5 ms | 5.2 MB |
+| async-snmp | 4 ms | 3.5 MB |
+| csnmp | 3 ms | 2.9 MB |
+| net-snmp (C) | 0 ms | 8.1 MB |
+| snmpify (Python) | 44 ms | 21.9 MB |
+| ezsnmp (Python) | 24 ms | 17.6 MB |
+| pysnmp (Python) | 108 ms | 36.9 MB |
 
 ## Findings
 
@@ -115,22 +177,31 @@ Versions: snmp2 0.5.3, async-snmp 0.18.1, csnmp 0.6.0, pysnmp 7.1.33, ezsnmp 2.5
   snmpify took 2 s here (that is why it has one now); async-snmp, whose
   shared transport has no such cap, takes 4 s, and pysnmp loses a third
   of the answers. snmp2 and csnmp open a socket per agent (snmp2: 134 MB).
-- **Walks** and single GetRequests: snmpify and snmp2 are level (the
-  same CPU per walk and per request, within the noise between runs), and
-  ahead of net-snmp's C library, async-snmp and csnmp. What is left is the
-  kernel's UDP work (`sendto`, `recvfrom`, `epoll_wait`: the same calls,
-  as many, in every library). snmpify's walk reads the answers in place
-  (`Client::walk_with`), as snmp2's does; `walk_all` with owned values costs
-  about 10% more CPU. Getting there (see the git history): requests read
-  the socket themselves instead of a receive task, no per-request timer
-  (one shared deadline sleep), no table entry or channel when nobody else
-  is waiting, answers matched on their headers and decoded where they lie,
-  connected sockets for single-agent clients, vectors sized once.
-- **SNMPv3** (SHA + AES-128): snmpify's owned walk takes the least CPU
-  of all (64 ms against snmp2's 72 ms and net-snmp's 100 ms).
-- **Python**: snmpify's package walks about 10 times faster than ezsnmp
-  (net-snmp underneath) and about 80 times faster than pysnmp, with the
-  least CPU; a GetRequest takes 11 µs (ezsnmp 16 µs, pysnmp 422 µs).
+- **Walks**, and single Get, GetNext, GetBulk and Set requests: snmpify
+  and snmp2 are close (within 1–4 ms of CPU per 2000–5000 requests;
+  the order changes between runs), and ahead of async-snmp and csnmp.
+  net-snmp's C library takes the least CPU for short single requests;
+  snmpify and snmp2 walk with less. What is left is mostly the kernel's
+  UDP work (`sendto`, `recvfrom`, `epoll_wait`: the same calls, as many,
+  in every library). snmpify's walk reads the answers in place
+  (`Client::walk_with`), as snmp2's does; `walk_all` with owned values
+  costs 10–30% more CPU. Getting there (see the git history): requests
+  read the socket themselves instead of a receive task, no per-request
+  timer (one shared deadline sleep), no table entry or channel when
+  nobody else is waiting, answers matched on their headers and decoded
+  where they lie, connected sockets for single-agent clients, vectors
+  sized once.
+- **SNMPv3** (SHA + AES-128): snmpify, owned or in place, and snmp2 take
+  about the same CPU (72–74 ms), ahead of net-snmp (110 ms) and
+  async-snmp (117 ms).
+- **Traps and informs**: snmpify and async-snmp send a trap in 2–3 µs,
+  net-snmp in 3 µs; an acknowledged inform takes 8 µs (net-snmp 10 µs,
+  async-snmp 11 µs, csnmp 16 µs). snmp2 cannot send notifications;
+  ezsnmp only through its `snmptrap` command wrapper (106 µs a trap).
+- **Python**: snmpify's package walks about 9 times faster than ezsnmp
+  (net-snmp underneath) and about 70 times faster than pysnmp, with the
+  least CPU in every operation; a GetRequest takes 10 µs (ezsnmp 24 µs,
+  pysnmp 431 µs).
 - **Failures seen**: csnmp's `walk_bulk` fails when a walk reaches the end
   of the agent's MIB (the standard endOfMibView answer echoes the request's
   OID, which it takes for a loop); the agent has one object after the

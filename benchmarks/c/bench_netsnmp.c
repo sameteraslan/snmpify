@@ -1,5 +1,5 @@
 /* net-snmp's C library (libnetsnmp): the reference implementation.
- *   bench_netsnmp walk|walk3|get|poll HOST PORT N
+ *   bench_netsnmp walk|walk3|get|getnext|bulk|set|trap|inform|poll HOST PORT N
  * Walks: GetBulk loops (max-repetitions 25) with the synchronous API;
  * polling: the asynchronous API (one session per agent, select loop). */
 #include <net-snmp/net-snmp-config.h>
@@ -141,6 +141,76 @@ int main(int argc, char **argv) {
             lat[i] = (now_ms() - s) * 1e3;
         }
         report(n, now_ms() - t0, lat, n);
+    } else if (!strcmp(scenario, "getnext") || !strcmp(scenario, "bulk") || !strcmp(scenario, "set") ||
+               !strcmp(scenario, "trap") || !strcmp(scenario, "inform")) {
+        int notify = !strcmp(scenario, "trap") || !strcmp(scenario, "inform");
+        if (notify) snprintf(peer, sizeof peer, "udp:%s:%d", host, port - 1);
+        netsnmp_session s;
+        snmp_sess_init(&s);
+        s.peername = peer;
+        s.version = SNMP_VERSION_2c;
+        s.community = (u_char *)(!strcmp(scenario, "set") ? "private" : "public");
+        s.community_len = strlen((char *)s.community);
+        s.timeout = 1000000;
+        s.retries = 2;
+        netsnmp_session *ss = snmp_open(&s);
+        if (!ss) {
+            snmp_perror("snmp_open");
+            return 1;
+        }
+        oid a[MAX_OID_LEN], uptime[MAX_OID_LEN], trapoid[MAX_OID_LEN];
+        size_t alen = MAX_OID_LEN, ulen = MAX_OID_LEN, tlen = MAX_OID_LEN;
+        const char *which = !strcmp(scenario, "getnext") ? "1.3.6.1.2.1.1.5.0"
+                            : !strcmp(scenario, "bulk")  ? "1.3.6.1.4.1.99999.1"
+                            : !strcmp(scenario, "set")   ? "1.3.6.1.4.1.99999.3.0"
+                                                         : "1.3.6.1.2.1.2.2.1.1.7";
+        read_objid(which, a, &alen);
+        read_objid("1.3.6.1.2.1.1.3.0", uptime, &ulen);
+        read_objid("1.3.6.1.6.3.1.1.4.1.0", trapoid, &tlen);
+        double *lat = malloc(sizeof(double) * n);
+        int items = 0;
+        for (int i = 0; i < n; i++) {
+            double st = now_ms();
+            int type = !strcmp(scenario, "getnext") ? SNMP_MSG_GETNEXT
+                       : !strcmp(scenario, "bulk")  ? SNMP_MSG_GETBULK
+                       : !strcmp(scenario, "set")   ? SNMP_MSG_SET
+                       : !strcmp(scenario, "trap")  ? SNMP_MSG_TRAP2
+                                                    : SNMP_MSG_INFORM;
+            netsnmp_pdu *pdu = snmp_pdu_create(type), *resp = NULL;
+            char buf[32];
+            if (type == SNMP_MSG_GETBULK) {
+                pdu->non_repeaters = 0;
+                pdu->max_repetitions = 50;
+            }
+            if (notify) {
+                snmp_add_var(pdu, uptime, ulen, 't', "0");
+                snmp_add_var(pdu, trapoid, tlen, 'o', "1.3.6.1.6.3.1.1.5.3");
+                snmp_add_var(pdu, a, alen, 'i', "7");
+            } else if (type == SNMP_MSG_SET) {
+                snprintf(buf, sizeof buf, "value %d", i);
+                snmp_add_var(pdu, a, alen, 's', buf);
+            } else {
+                snmp_add_null_var(pdu, a, alen);
+            }
+            if (type == SNMP_MSG_TRAP2) {
+                if (!snmp_send(ss, pdu)) {
+                    snmp_free_pdu(pdu);
+                    fprintf(stderr, "send failed\n");
+                    return 1;
+                }
+                items++;
+            } else {
+                if (snmp_synch_response(ss, pdu, &resp) != STAT_SUCCESS || !resp ||
+                    resp->errstat != SNMP_ERR_NOERROR) {
+                    fprintf(stderr, "%s failed\n", scenario);
+                    return 1;
+                }
+                for (netsnmp_variable_list *v = resp->variables; v; v = v->next_variable) items++;
+                snmp_free_pdu(resp);
+            }
+            lat[i] = (now_ms() - st) * 1e3;
+        }
+        report(!strcmp(scenario, "inform") ? n : items, now_ms() - t0, lat, n);
     } else if (!strcmp(scenario, "poll")) {
         oid name[MAX_OID_LEN];
         size_t len = MAX_OID_LEN;

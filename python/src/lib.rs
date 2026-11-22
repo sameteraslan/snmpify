@@ -293,6 +293,7 @@ fn priv_protocol(py: Python<'_>, s: &str) -> PyResult<PrivProtocol> {
             "AES256" => PrivProtocol::Aes256,
             "AES192C" => PrivProtocol::Aes192Cisco,
             "AES256C" => PrivProtocol::Aes256Cisco,
+            "3DES" | "DES3" | "3DESEDE" | "TDES" => PrivProtocol::Des3,
             _ => return Err(invalid(py, format!("unknown privacy protocol {s:?}"))),
         },
     )

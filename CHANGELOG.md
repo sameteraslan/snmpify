@@ -13,6 +13,11 @@
   net-snmp's C library.
 
 ### Added
+- SNMPv3 privacy `PrivProtocol::Des3`: CBC-3DES-EDE
+  (draft-reeder-snmpv3-usm-3desede-00), checked against pysnmp's keys
+  and traps (`"3DES"` in Python and C).
+- Benchmarks for every operation: GetNext, GetBulk, Set, traps and
+  informs, in all compared libraries.
 - `snmpify::view`: zero-copy views (`VarBindRef`, `ValueRef`, `OidRef`,
   `Varbinds`, `community_pdu`) and `Client::walk_with`, a walk handing
   each binding over in place.

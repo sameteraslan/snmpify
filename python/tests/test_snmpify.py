@@ -25,6 +25,7 @@ from snmpify import (
 ENT = "1.3.6.1.4.1.99999"
 ALICE = snmpify.UsmUser("alice", auth=("SHA-256", "alice-auth"), privacy=("AES", "alice-priv"))
 BOB = snmpify.UsmUser("bob", auth=("MD5", "bob-auth-pass"))
+CAROL = snmpify.UsmUser("carol", auth=("SHA", "carol-auth"), privacy=("3DES", "carol-priv"))
 
 
 @pytest.fixture(scope="module")
@@ -32,7 +33,7 @@ def agent():
     a = snmpify.Agent(
         "127.0.0.1:0",
         communities={"public": "ro", "private": "rw"},
-        users=[(ALICE, "rw"), (BOB, "ro")],
+        users=[(ALICE, "rw"), (BOB, "ro"), (CAROL, "ro")],
     )
     a.set("1.3.6.1.2.1.1.5.0", "py-agent")
     a.set(f"{ENT}.1.0", 7)
@@ -65,10 +66,11 @@ VERSIONS = [
     {"community": "public"},
     {"user": ALICE},
     {"user": BOB},
+    {"user": CAROL},
 ]
 
 
-@pytest.mark.parametrize("kw", VERSIONS, ids=["v1", "v2c", "v3-authPriv", "v3-authNoPriv"])
+@pytest.mark.parametrize("kw", VERSIONS, ids=["v1", "v2c", "v3-authPriv", "v3-authNoPriv", "v3-3des"])
 def test_get_types_walk(agent, kw):
     c = client(agent, **kw)
     assert c.get("1.3.6.1.2.1.1.5.0") == b"py-agent"

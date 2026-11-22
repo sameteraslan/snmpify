@@ -37,7 +37,7 @@ subclasses), `snmpify.IpAddress` / `ObjectId` (`str` subclasses),
 `snmpify.NO_SUCH_OBJECT` … Pass them to `set` to choose the type.
 
 Protocols: `MD5`, `SHA`, `SHA-224` … `SHA-512`; `DES`, `AES`, `AES-192`,
-`AES-256`, and Cisco's AES variants `AES-192-C`, `AES-256-C`.
+`AES-256`, Cisco's AES variants `AES-192-C`, `AES-256-C`, and `3DES`.
 
 Errors: `snmpify.SnmpTimeout`, `AgentError` (`.status`, `.index`,
 `.oid`), `ReportError` (SNMPv3: `.kind`, e.g. `wrongDigest`), all
