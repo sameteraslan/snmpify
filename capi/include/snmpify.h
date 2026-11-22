@@ -117,7 +117,8 @@ void snmpify_result_free(snmpify_result *r);
 
 typedef struct snmpify_user snmpify_user;
 /* An SNMPv3 user. Protocols (NULL for none): "MD5", "SHA", "SHA-224",
- * "SHA-256", "SHA-384", "SHA-512"; "DES", "AES", "AES-192", "AES-256".
+ * "SHA-256", "SHA-384", "SHA-512"; "DES", "AES", "AES-192", "AES-256",
+ * and Cisco's AES key extension "AES-192-C", "AES-256-C".
  * Passwords need 8 characters or more. */
 snmpify_user *snmpify_user_new(const char *name, const char *auth_protocol,
                                const char *auth_password, const char *priv_protocol,

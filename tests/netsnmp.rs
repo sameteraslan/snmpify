@@ -351,6 +351,7 @@ mod client {
             Some(PrivProtocol::Aes128) => "aes",
             Some(PrivProtocol::Aes192) => "aes192",
             Some(PrivProtocol::Aes256) => "aes256",
+            Some(p) => unreachable!("snmpd has no {p} users"),
         }
     }
 

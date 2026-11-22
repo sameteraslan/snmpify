@@ -370,3 +370,94 @@ fn privacy_flag_without_privacy_keys() {
         UsmError::UnsupportedSecurityLevel
     );
 }
+
+#[test]
+fn aes_key_extensions_match_pysnmp() {
+    // pysnmp 7.1 (eso/priv/aesbase.py), password "maplesyrup", engine id
+    // 00…02 (RFC 3414 A.3): Blumenthal and Reeder (Cisco) extensions.
+    let e = hex(RFC_ENGINE);
+    let cases = [
+        (
+            AuthProtocol::Md5,
+            PrivProtocol::Aes192Cisco,
+            "526f5eed9fcce26f8964c2930787d82b79eff44a90650ee0",
+        ),
+        (
+            AuthProtocol::Md5,
+            PrivProtocol::Aes256Cisco,
+            "526f5eed9fcce26f8964c2930787d82b79eff44a90650ee0a3a40abfac5acc12",
+        ),
+        (
+            AuthProtocol::Md5,
+            PrivProtocol::Aes192,
+            "526f5eed9fcce26f8964c2930787d82bfa24a92467426c2f",
+        ),
+        (
+            AuthProtocol::Md5,
+            PrivProtocol::Aes256,
+            "526f5eed9fcce26f8964c2930787d82bfa24a92467426c2f4b09192be10dfaec",
+        ),
+        (
+            AuthProtocol::Sha1,
+            PrivProtocol::Aes192Cisco,
+            "6695febc9288e36282235fc7151f128497b38f3f9b8b6d78",
+        ),
+        (
+            AuthProtocol::Sha1,
+            PrivProtocol::Aes256Cisco,
+            "6695febc9288e36282235fc7151f128497b38f3f9b8b6d78936ba6e7d19dfd9c",
+        ),
+        (
+            AuthProtocol::Sha1,
+            PrivProtocol::Aes192,
+            "6695febc9288e36282235fc7151f128497b38f3f505e07eb",
+        ),
+        (
+            AuthProtocol::Sha1,
+            PrivProtocol::Aes256,
+            "6695febc9288e36282235fc7151f128497b38f3f505e07eb9af25568fa1f5dbe",
+        ),
+        (
+            AuthProtocol::Sha256,
+            PrivProtocol::Aes256Cisco,
+            "8982e0e549e866db361a6b625d84cccc11162d453ee8ce3a6445c2d6776f0f8b",
+        ),
+        (
+            AuthProtocol::Sha256,
+            PrivProtocol::Aes256,
+            "8982e0e549e866db361a6b625d84cccc11162d453ee8ce3a6445c2d6776f0f8b",
+        ),
+    ];
+    for (a, p, want) in cases {
+        let ku = a.password_to_key(b"maplesyrup").unwrap();
+        assert_eq!(p.localize(a, &ku, &e), hex(want), "{a} {p}");
+    }
+    // Sealed and opened like the others.
+    let engine = hex("80001f8880 0102030405");
+    for p in [PrivProtocol::Aes192Cisco, PrivProtocol::Aes256Cisco] {
+        let u = UsmUser::new("cisco")
+            .with_auth(AuthProtocol::Sha1, "auth-pass")
+            .unwrap()
+            .with_privacy(p, "priv-pass")
+            .unwrap();
+        let k = u.localize(&engine);
+        let b = k.seal(request(&engine), 5).unwrap();
+        assert_eq!(k.open(&b).unwrap().data, request(&engine).data);
+        // Not interchangeable with the standard extension.
+        let std = UsmUser::new("cisco")
+            .with_auth(AuthProtocol::Sha1, "auth-pass")
+            .unwrap()
+            .with_privacy(
+                if p == PrivProtocol::Aes192Cisco {
+                    PrivProtocol::Aes192
+                } else {
+                    PrivProtocol::Aes256
+                },
+                "priv-pass",
+            )
+            .unwrap()
+            .localize(&engine);
+        assert_eq!(std.open(&b).unwrap_err(), UsmError::DecryptionError);
+        assert!(p.to_string().ends_with("-C"));
+    }
+}

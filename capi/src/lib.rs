@@ -407,7 +407,8 @@ pub unsafe extern "C" fn snmpify_result_free(r: *mut snmpify_result) {
 pub struct snmpify_user(UsmUser);
 
 /// An SNMPv3 user. Protocols (NULL for none): "MD5", "SHA", "SHA-224",
-/// "SHA-256", "SHA-384", "SHA-512"; "DES", "AES", "AES-192", "AES-256".
+/// "SHA-256", "SHA-384", "SHA-512"; "DES", "AES", "AES-192", "AES-256",
+/// "AES-192-C", "AES-256-C" (Cisco's key extension).
 /// Passwords need 8 characters or more. NULL on error.
 #[no_mangle]
 pub unsafe extern "C" fn snmpify_user_new(
@@ -439,6 +440,8 @@ pub unsafe extern "C" fn snmpify_user_new(
                 "AES" | "AES128" => PrivProtocol::Aes128,
                 "AES192" => PrivProtocol::Aes192,
                 "AES256" => PrivProtocol::Aes256,
+                "AES192C" => PrivProtocol::Aes192Cisco,
+                "AES256C" => PrivProtocol::Aes256Cisco,
                 _ => return Err(invalid(format!("unknown privacy protocol {p:?}"))),
             };
             u = u
