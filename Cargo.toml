@@ -48,3 +48,7 @@ required-features = ["v3"]
 [[example]]
 name = "walk"
 required-features = ["client"]
+
+[[example]]
+name = "codec_bench"
+required-features = ["v3"]

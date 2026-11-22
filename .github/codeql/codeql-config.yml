@@ -1,0 +1,7 @@
+# Test code is full of fixed passwords, keys and salts on purpose (known-answer
+# vectors, test users); scan the library and the workflows only.
+paths-ignore:
+  - tests
+  - examples
+  - fuzz
+  - src/usm/tests.rs
