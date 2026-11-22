@@ -1,0 +1,26 @@
+name: Bug report
+description: Something fails, hangs, decodes wrong or interoperates badly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead (errors, values).
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Code or packet to reproduce
+      description: The smallest code that shows the problem. For decoding bugs, the message bytes in hex (e.g. from Wireshark) help most.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      placeholder: snmpify 0.1.0, agent (vendor/model/firmware), SNMP version
+    validations:
+      required: true
