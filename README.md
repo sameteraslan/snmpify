@@ -16,7 +16,8 @@
 > subagent), and MIBs (55 standard modules built in, vendor MIB files
 > loaded at run time), all tested against net-snmp, with Python bindings
 > (`pip install snmpify`, blocking and asyncio) and a C/C++ API (CMake,
-> pkg-config; Linux, macOS, Windows). Next: benchmarks; see the
+> pkg-config; Linux, macOS, Windows), benchmarked against the other SNMP
+> libraries ([benchmarks/](benchmarks/README.md)). See the
 > [roadmap](ROADMAP.md).
 
 ## Why snmpify
