@@ -3,15 +3,15 @@
 [![CI](https://github.com/snmp-rs/snmpify/actions/workflows/ci.yml/badge.svg)](https://github.com/snmp-rs/snmpify/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/snmp-rs/snmpify/actions/workflows/codeql.yml/badge.svg)](https://github.com/snmp-rs/snmpify/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/snmp-rs/snmpify/badge)](https://scorecard.dev/viewer/?uri=github.com/snmp-rs/snmpify)
-[![MSRV](https://img.shields.io/badge/MSRV-1.80-blue)](Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-blue)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 **Fast, safe SNMP for Rust, with Python and C/C++ bindings on the way.**
 
-> **Status:** early. This first part is the SNMP wire format (BER, OIDs,
-> values, every PDU, SNMPv1/v2c messages), tested against net-snmp. The
-> async client, SNMPv3, traps and the bindings follow; see the
-> [roadmap](ROADMAP.md).
+> **Status:** early. Done: the SNMP wire format and an async SNMPv1/v2c
+> client (get, get-next, get-bulk, set, walks, mass polling over one
+> socket), tested against net-snmp. SNMPv3, traps and the Python and C/C++
+> bindings follow; see the [roadmap](ROADMAP.md).
 
 ## Why snmpify
 
@@ -24,32 +24,42 @@
   allocation.
 - **Interoperable.** Every change is tested against net-snmp's `snmpd`
   (Get, GetNext, GetBulk, Set, v1 and v2c error handling, a full walk).
-- **No dependencies** in the core.
+- **Few dependencies**: none for the wire format, tokio for the client.
 
 ## Example
 
+```toml
+[dependencies]
+snmpify = "0.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
 ```rust,no_run
-use snmpify::{AnyPdu, CommunityMessage, Oid, Pdu, Version};
-use std::net::UdpSocket;
+use snmpify::client::{Client, Community};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let socket = UdpSocket::bind("0.0.0.0:0")?;
-    socket.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+#[tokio::main]
+async fn main() -> Result<(), snmpify::client::Error> {
+    let client = Client::connect("192.0.2.1:161", Community::v2c("public")).await?;
 
-    let sys_descr: Oid = "1.3.6.1.2.1.1.1.0".parse()?;
-    let request = CommunityMessage::new(Version::V2c, "public", Pdu::get(1, [sys_descr]));
-    socket.send_to(&request.encode(), "192.0.2.1:161")?;
+    // One value …
+    println!("{}", client.get_one("1.3.6.1.2.1.1.1.0").await?);
 
-    let mut buf = [0u8; 65535];
-    let n = socket.recv(&mut buf)?;
-    if let AnyPdu::Pdu(response) = CommunityMessage::decode(&buf[..n])?.pdu {
-        for vb in &response.varbinds {
-            println!("{vb}"); // 1.3.6.1.2.1.1.1.0 = Linux router 6.1 …
-        }
+    // … or a whole table, with GetBulk (GetNext on SNMPv1).
+    let mut walk = client.walk("1.3.6.1.2.1.2.2")?;
+    while let Some(vb) = walk.next().await {
+        println!("{}", vb?); // 1.3.6.1.2.1.2.2.1.2.1 = lo …
     }
     Ok(())
 }
 ```
+
+Polling many agents: `Manager::bind("0.0.0.0:0")` gives clients
+(`manager.client(addr, community)`) that share one UDP socket and receive
+task; responses are matched by request id, source address and community,
+lost packets are retransmitted (`Options`: timeout 1 s, 2 retries).
+
+Only the wire format, without tokio: `default-features = false`, then
+`CommunityMessage::new(…).encode()` / `CommunityMessage::decode(bytes)`.
 
 ## Testing
 

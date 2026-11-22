@@ -2,7 +2,7 @@
 name = "snmpify"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 description = "Fast SNMP for Rust: BER codec, v1/v2c/v3 messages, async client and trap receiver, with Python and C/C++ bindings."
 license = "MIT"
 repository = "https://github.com/snmp-rs/snmpify"
@@ -11,6 +11,13 @@ readme = "README.md"
 keywords = ["snmp", "network", "monitoring", "mib", "netsnmp"]
 categories = ["network-programming", "encoding", "parser-implementations"]
 
+[features]
+default = ["client"]
+# The async client (tokio). Without it, only the wire format (no dependencies).
+client = ["dep:tokio"]
+
 [dependencies]
+tokio = { version = "1.38", features = ["net", "time", "sync", "rt"], optional = true }
 
 [dev-dependencies]
+tokio = { version = "1.38", features = ["macros", "rt-multi-thread", "net", "time", "sync"] }

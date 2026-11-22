@@ -1,10 +1,11 @@
 //! # snmpify
 //!
-//! Fast SNMP for Rust. This release contains the wire format: a zero-copy
-//! BER decoder, a back-to-front encoder that never copies nested values,
-//! OIDs stored inline, all SMIv2 value types, every PDU and SNMPv1/v2c
-//! messages. The async client, SNMPv3, notifications and the Python and
-//! C/C++ bindings are on the [roadmap](https://github.com/snmp-rs/snmpify/blob/main/ROADMAP.md).
+//! Fast SNMP for Rust: the wire format (a zero-copy BER decoder, a
+//! back-to-front encoder that never copies nested values, OIDs stored
+//! inline, all SMIv2 value types, every PDU, SNMPv1/v2c messages) and an
+//! async client ([`client`]) with walks and mass polling over one socket.
+//! SNMPv3, notifications and the Python and C/C++ bindings are on the
+//! [roadmap](https://github.com/snmp-rs/snmpify/blob/main/ROADMAP.md).
 //!
 //! ```
 //! use snmpify::{CommunityMessage, Pdu, Value, VarBind, Version, AnyPdu};
@@ -26,6 +27,8 @@
 #![warn(missing_docs)]
 
 pub mod ber;
+#[cfg(feature = "client")]
+pub mod client;
 mod error;
 mod oid;
 mod pdu;

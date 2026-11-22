@@ -2,9 +2,20 @@
 
 ## Unreleased
 
-First code: the SNMP wire format.
+First code: the SNMP wire format and an async v1/v2c client.
 
 ### Added
+- Minimum supported Rust version 1.85 (tokio needs it), checked in CI.
+- `client` (feature `client`, on by default; tokio): `Client` with `get`,
+  `get_one`, `get_next`, `get_bulk`, `set`, `walk` (GetBulk in v2c, GetNext
+  in v1, stops at the end of the subtree, fails instead of looping on an
+  agent whose OIDs do not increase), `walk_all` and raw `request`;
+  `Manager`: many clients over one UDP socket and receive task, responses
+  matched by request id, source address, version and community;
+  retransmission (`Options`: timeout, retries, max-repetitions);
+  cancellation-safe. Tested against a scripted agent (loss, timeouts,
+  spoofed/stray/garbage answers, 500 concurrent requests, broken walks) and
+  against net-snmp. `examples/walk.rs`.
 - BER codec (`snmpify::ber`): zero-copy `Reader`, back-to-front `Writer`
   (nested values are never copied to prepend their length), definite
   lengths only, strict about malformed input.
