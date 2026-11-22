@@ -11,9 +11,10 @@
 > **Status:** early. Done: the SNMP wire format, an async client for
 > SNMPv1, v2c and v3 (get, get-next, get-bulk, set, walks, mass polling
 > over one socket; USM with every standard authentication and privacy
-> protocol), and notifications (sending and receiving traps and informs
-> in every version), all tested against net-snmp. Next: the agent, MIBs,
-> and the Python and C/C++ bindings; see the [roadmap](ROADMAP.md).
+> protocol), notifications (sending and receiving traps and informs in
+> every version), and the agent side (a v1/v2c/v3 agent and an AgentX
+> subagent), all tested against net-snmp. Next: MIBs and the Python and
+> C/C++ bindings; see the [roadmap](ROADMAP.md).
 
 ## Why snmpify
 
@@ -29,7 +30,8 @@
   (Get, GetNext, GetBulk, Set, v1 and v2c error handling, a full walk,
   and SNMPv3 with all 31 combinations of authentication and privacy) and
   `snmptrapd` / `snmptrap` / `snmpinform` (traps and informs both ways,
-  v1, v2c and v3).
+  v1, v2c and v3); the agent is queried with net-snmp's tools and runs
+  as an AgentX subagent of snmpd.
 - **SNMPv3 done carefully.** MD5, SHA-1, SHA-224/256/384/512; DES,
   AES-128/192/256. Answers count only if they authenticate at the
   request's level, for the right engine, inside the time window; forged,
@@ -57,7 +59,7 @@ Rust crates, from their documentation (November 2026). ✓ = supported,
 | Timeouts and retries built in | ✓ | ✓ | timeout (blocking API) | ✓ | timeout |
 | Walk / bulk walk helper | ✓ | ✓ | — | ✓ | — |
 | Traps and informs | send and receive | send and receive | parse received | send | — |
-| Agent | *planned* | ✓ | — | — | — |
+| Agent | ✓ (and AgentX subagent) | ✓ | — | — | — |
 | MIB names | *planned* | ✓ (mib-rs) | ✓ (needs libnetsnmp) | — | — |
 | TCP transport | — | ✓ | — | — | — |
 | Wire format usable without the client | ✓ | — | ✓ | — | ✓ |
@@ -168,6 +170,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+An agent: values in a `MibTree` (fixed, writable or computed) or any
+`MibHandler`, served over v1, v2c and v3 with read-only and read-write
+communities and users; the same handlers run as an AgentX subagent of
+net-snmp's snmpd (`agentx::Subagent`):
+
+```rust,no_run
+use snmpify::agent::{Access, Agent, MibTree};
+use snmpify::Value;
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let mib = MibTree::new().with_system("my device", "1.3.6.1.4.1.99999".parse().unwrap(), "dev-1", || 0);
+    mib.insert_fn("1.3.6.1.4.1.99999.1.0".parse().unwrap(), || Value::Gauge32(42));
+    Agent::bind("0.0.0.0:161")
+        .await?
+        .with_community("public", Access::ReadOnly)
+        .register("1.3.6.1.2.1.1".parse().unwrap(), mib.clone())
+        .register("1.3.6.1.4.1.99999".parse().unwrap(), mib)
+        .run()
+        .await
+}
+```
+
 Polling many agents: `Manager::bind("0.0.0.0:0")` gives clients
 (`manager.client(addr, community)`) that share one UDP socket and receive
 task; responses are matched by request id, source address and community,
@@ -197,14 +222,15 @@ cargo test                                   # unit, robustness and doc tests
 
 # Interoperability with net-snmp's snmpd and snmptrapd
 docker build -t snmpify-snmpd tools/snmpd
-docker run -d --rm --name snmpify-snmpd -p 127.0.0.1:1161:161/udp snmpify-snmpd
+docker run -d --rm --name snmpify-snmpd -p 127.0.0.1:1161:161/udp \
+  -p 127.0.0.1:1705:705/tcp snmpify-snmpd
 docker run -d --rm --name snmpify-snmptrapd -p 127.0.0.1:1162:162/udp \
   --entrypoint /usr/sbin/snmptrapd snmpify-snmpd -f -Lo -C -c /etc/snmp/snmptrapd.conf
-SNMPIFY_AGENT=127.0.0.1:1161 SNMPIFY_TRAPD=127.0.0.1:1162 \
-  cargo test --test netsnmp --test netsnmp_notifications
+SNMPIFY_AGENT=127.0.0.1:1161 SNMPIFY_TRAPD=127.0.0.1:1162 SNMPIFY_AGENTX=127.0.0.1:1705 \
+  cargo test --test netsnmp --test netsnmp_notifications --test netsnmp_agent
 
 # Coverage (cargo install cargo-llvm-cov), with the snmpd tests
-SNMPIFY_AGENT=127.0.0.1:1161 SNMPIFY_TRAPD=127.0.0.1:1162 \
+SNMPIFY_AGENT=127.0.0.1:1161 SNMPIFY_TRAPD=127.0.0.1:1162 SNMPIFY_AGENTX=127.0.0.1:1705 \
   cargo llvm-cov --all-targets --summary-only
 
 cargo +nightly fuzz run decode_message       # fuzzing (cargo install cargo-fuzz)
